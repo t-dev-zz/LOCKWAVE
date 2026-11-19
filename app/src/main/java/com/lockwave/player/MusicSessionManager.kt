@@ -46,6 +46,8 @@ class MusicSessionManager(private val context: Context) {
                 MediaSession.FLAG_HANDLES_TRANSPORT_CONTROLS
         )
 
+        session.setSessionActivity(appIntent())
+
         session.setCallback(object : MediaSession.Callback() {
 
             override fun onPlay() {
@@ -91,7 +93,11 @@ class MusicSessionManager(private val context: Context) {
 
             session.setPlaybackState(
                 PlaybackState.Builder()
-                    .setState(PlaybackState.STATE_NONE, 0L, 0f)
+                    .setState(
+                        PlaybackState.STATE_NONE,
+                        0L,
+                        0f
+                    )
                     .build()
             )
 
@@ -116,17 +122,36 @@ class MusicSessionManager(private val context: Context) {
                     MediaMetadata.METADATA_KEY_ALBUM_ART
                 )
 
-        val duration = metadata?.getLong(
-            MediaMetadata.METADATA_KEY_DURATION
-        ) ?: 0L
+        val duration = (
+            metadata?.getLong(
+                MediaMetadata.METADATA_KEY_DURATION
+            ) ?: 0L
+        ).coerceAtLeast(0L)
 
-        session.setMetadata(
-            MediaMetadata.Builder()
-                .putString(MediaMetadata.METADATA_KEY_TITLE, title)
-                .putString(MediaMetadata.METADATA_KEY_ARTIST, artist)
-                .putLong(MediaMetadata.METADATA_KEY_DURATION, duration)
-                .build()
-        )
+        val sessionMetadata = MediaMetadata.Builder()
+            .putString(
+                MediaMetadata.METADATA_KEY_TITLE,
+                title
+            )
+            .putString(
+                MediaMetadata.METADATA_KEY_ARTIST,
+                artist
+            )
+            .putLong(
+                MediaMetadata.METADATA_KEY_DURATION,
+                duration
+            )
+
+        // Artwork is notification/session metadata only.
+        // LOCKWAVE does not display an album-art screen.
+        if (artwork != null) {
+            sessionMetadata.putBitmap(
+                MediaMetadata.METADATA_KEY_ART,
+                artwork
+            )
+        }
+
+        session.setMetadata(sessionMetadata.build())
 
         val state = playback?.state ?: PlaybackState.STATE_NONE
         val position = playback?.position ?: 0L
@@ -136,11 +161,23 @@ class MusicSessionManager(private val context: Context) {
         var actions =
             PlaybackState.ACTION_PLAY or
                 PlaybackState.ACTION_PAUSE or
-                PlaybackState.ACTION_PLAY_PAUSE or
-                PlaybackState.ACTION_SKIP_TO_NEXT or
-                PlaybackState.ACTION_SKIP_TO_PREVIOUS
+                PlaybackState.ACTION_PLAY_PAUSE
 
-        if ((sourceActions and PlaybackState.ACTION_SEEK_TO) != 0L) {
+        if (
+            (sourceActions and PlaybackState.ACTION_SKIP_TO_NEXT) != 0L
+        ) {
+            actions = actions or PlaybackState.ACTION_SKIP_TO_NEXT
+        }
+
+        if (
+            (sourceActions and PlaybackState.ACTION_SKIP_TO_PREVIOUS) != 0L
+        ) {
+            actions = actions or PlaybackState.ACTION_SKIP_TO_PREVIOUS
+        }
+
+        if (
+            (sourceActions and PlaybackState.ACTION_SEEK_TO) != 0L
+        ) {
             actions = actions or PlaybackState.ACTION_SEEK_TO
         }
 
@@ -158,7 +195,12 @@ class MusicSessionManager(private val context: Context) {
 
         session.isActive = true
 
-        showNotification(title, artist, artwork, state)
+        showNotification(
+            title,
+            artist,
+            artwork,
+            state
+        )
     }
 
     private fun createNotificationChannel() {
@@ -171,7 +213,8 @@ class MusicSessionManager(private val context: Context) {
             ).apply {
                 description = "Current music playback"
                 setShowBadge(false)
-                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+                lockscreenVisibility =
+                    Notification.VISIBILITY_PUBLIC
             }
 
             notificationManager.createNotificationChannel(channel)
@@ -222,7 +265,10 @@ class MusicSessionManager(private val context: Context) {
 
         val playing = state == PlaybackState.STATE_PLAYING
 
-        val notification = Notification.Builder(context, CHANNEL_ID)
+        val notification = Notification.Builder(
+            context,
+            CHANNEL_ID
+        )
             .setSmallIcon(android.R.drawable.ic_media_play)
             .setContentTitle(title)
             .setContentText(artist)
@@ -247,8 +293,11 @@ class MusicSessionManager(private val context: Context) {
             )
             .addAction(
                 Notification.Action.Builder(
-                    if (playing) android.R.drawable.ic_media_pause
-                    else android.R.drawable.ic_media_play,
+                    if (playing) {
+                        android.R.drawable.ic_media_pause
+                    } else {
+                        android.R.drawable.ic_media_play
+                    },
                     if (playing) "Pause" else "Play",
                     actionIntent(
                         if (playing) ACTION_PAUSE else ACTION_PLAY
@@ -264,7 +313,10 @@ class MusicSessionManager(private val context: Context) {
             )
             .build()
 
-        notificationManager.notify(NOTIFICATION_ID, notification)
+        notificationManager.notify(
+            NOTIFICATION_ID,
+            notification
+        )
     }
 
     fun release() {
