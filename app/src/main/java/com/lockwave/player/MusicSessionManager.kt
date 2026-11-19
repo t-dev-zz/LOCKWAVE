@@ -34,10 +34,7 @@ class MusicSessionManager(
             Context.NOTIFICATION_SERVICE
         ) as NotificationManager
 
-    private val session = MediaSession(
-        context,
-        "LOCKWAVE"
-    )
+    private val session = MediaSession(context, "LOCKWAVE")
 
     private var sourceController: MediaController? = null
 
@@ -60,6 +57,13 @@ class MusicSessionManager(
                     sourceController?.transportControls?.pause()
                 }
 
+                override fun onPlayFromMediaId(
+                    mediaId: String?,
+                    extras: android.os.Bundle?
+                ) {
+                    sourceController?.transportControls?.play()
+                }
+
                 override fun onSkipToNext() {
                     sourceController?.transportControls?.skipToNext()
                 }
@@ -71,15 +75,29 @@ class MusicSessionManager(
                 override fun onSeekTo(pos: Long) {
                     sourceController?.transportControls?.seekTo(pos)
                 }
+
+                override fun onStop() {
+                    sourceController?.transportControls?.pause()
+                }
             }
         )
     }
 
     fun update(controller: MediaController?) {
+
         sourceController = controller
 
         if (controller == null) {
             session.isActive = false
+            session.setPlaybackState(
+                PlaybackState.Builder()
+                    .setState(
+                        PlaybackState.STATE_NONE,
+                        0L,
+                        0f
+                    )
+                    .build()
+            )
             notificationManager.cancel(NOTIFICATION_ID)
             return
         }
@@ -139,6 +157,9 @@ class MusicSessionManager(
             ?: PlaybackState.STATE_NONE
 
         val position = playback?.position ?: 0L
+        val speed = playback?.playbackSpeed ?: 1f
+
+        val sourceActions = playback?.actions ?: 0L
 
         val actions =
             PlaybackState.ACTION_PLAY or
@@ -146,7 +167,7 @@ class MusicSessionManager(
             PlaybackState.ACTION_PLAY_PAUSE or
             PlaybackState.ACTION_SKIP_TO_NEXT or
             PlaybackState.ACTION_SKIP_TO_PREVIOUS or
-            PlaybackState.ACTION_SEEK_TO
+            (sourceActions and PlaybackState.ACTION_SEEK_TO)
 
         session.setPlaybackState(
             PlaybackState.Builder()
@@ -154,7 +175,7 @@ class MusicSessionManager(
                 .setState(
                     state,
                     position,
-                    playback?.playbackSpeed ?: 1f,
+                    speed,
                     SystemClock.elapsedRealtime()
                 )
                 .build()
@@ -162,11 +183,18 @@ class MusicSessionManager(
 
         session.isActive = true
 
-        showNotification(title, artist, artwork, state)
+        showNotification(
+            title,
+            artist,
+            artwork,
+            state
+        )
     }
 
     private fun createNotificationChannel() {
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+
             val channel = NotificationChannel(
                 CHANNEL_ID,
                 "LOCKWAVE Music",
@@ -182,12 +210,34 @@ class MusicSessionManager(
     }
 
     private fun actionIntent(action: String): PendingIntent {
-        val intent = Intent(context, MusicActionReceiver::class.java)
-            .setAction(action)
+
+        val intent = Intent(
+            context,
+            MusicActionReceiver::class.java
+        ).setAction(action)
 
         return PendingIntent.getBroadcast(
             context,
             action.hashCode(),
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or
+                PendingIntent.FLAG_IMMUTABLE
+        )
+    }
+
+    private fun appIntent(): PendingIntent {
+
+        val intent = Intent(
+            context,
+            MainActivity::class.java
+        ).apply {
+            flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                Intent.FLAG_ACTIVITY_SINGLE_TOP
+        }
+
+        return PendingIntent.getActivity(
+            context,
+            2001,
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or
                 PendingIntent.FLAG_IMMUTABLE
@@ -200,6 +250,7 @@ class MusicSessionManager(
         artwork: Bitmap?,
         state: Int
     ) {
+
         val playing = state == PlaybackState.STATE_PLAYING
 
         val notification = Notification.Builder(
@@ -210,10 +261,12 @@ class MusicSessionManager(
             .setContentTitle(title)
             .setContentText(artist)
             .setLargeIcon(artwork)
+            .setContentIntent(appIntent())
             .setVisibility(Notification.VISIBILITY_PUBLIC)
             .setCategory(Notification.CATEGORY_TRANSPORT)
             .setOngoing(playing)
             .setShowWhen(false)
+            .setOnlyAlertOnce(true)
             .setStyle(
                 Notification.MediaStyle()
                     .setMediaSession(session.sessionToken)
@@ -255,8 +308,12 @@ class MusicSessionManager(
     }
 
     fun release() {
+
+        sourceController = null
+
         session.isActive = false
         session.release()
+
         notificationManager.cancel(NOTIFICATION_ID)
     }
 }
