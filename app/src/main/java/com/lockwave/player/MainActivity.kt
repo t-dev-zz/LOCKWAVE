@@ -182,7 +182,7 @@ class MainActivity : AppCompatActivity() {
         window.decorView.systemUiVisibility = 0
 
         val scroll = ScrollView(this).apply {
-            fillViewport = true
+            isFillViewport = true
             setBackgroundColor(bg)
             isVerticalScrollBarEnabled = false
         }
