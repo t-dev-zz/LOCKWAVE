@@ -65,10 +65,15 @@ class MusicListenerService : NotificationListenerService() {
                 )
             )
 
-            val selected = sessions.firstOrNull {
+            // Exclude LOCKWAVE's own media session.
+            val externalSessions = sessions.filter {
+                it.packageName != packageName
+            }
+
+            val selected = externalSessions.firstOrNull {
                 it.playbackState?.state ==
                     PlaybackState.STATE_PLAYING
-            } ?: sessions.firstOrNull()
+            } ?: externalSessions.firstOrNull()
 
             if (selected == null) {
                 clearCurrentTrack()
