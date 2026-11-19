@@ -2,6 +2,8 @@
 package com.lockwave.player
 
 import android.content.ComponentName
+import android.content.Context
+import android.content.Intent
 import android.media.MediaMetadata
 import android.media.session.MediaController
 import android.media.session.PlaybackState
@@ -27,21 +29,55 @@ class MusicListenerService : NotificationListenerService() {
         var isPlaying = false
             private set
 
-        // Track duration in milliseconds
         var currentDuration = 0L
             private set
 
-        // Last reported playback position in milliseconds
         var currentPosition = 0L
             private set
 
-        // Playback speed reported by the source player
-        var playbackSpeed = 1f
+        var playbackSpeed = 0f
             private set
 
-        // Monotonic timestamp of the last position update
         var lastPositionUpdateTime = 0L
             private set
+
+        private var selectedController: MediaController? = null
+
+        fun dispatchAction(
+            action: String?,
+            position: Long? = null
+        ): Boolean {
+            val controller = selectedController ?: return false
+
+            return try {
+                when (action) {
+                    MusicSessionManager.ACTION_PLAY ->
+                        controller.transportControls.play()
+
+                    MusicSessionManager.ACTION_PAUSE ->
+                        controller.transportControls.pause()
+
+                    MusicSessionManager.ACTION_NEXT ->
+                        controller.transportControls.skipToNext()
+
+                    MusicSessionManager.ACTION_PREVIOUS ->
+                        controller.transportControls.skipToPrevious()
+
+                    MusicSessionManager.ACTION_SEEK -> {
+                        val target = position ?: return false
+                        if (target < 0L) return false
+                        controller.transportControls.seekTo(target)
+                    }
+
+                    else -> return false
+                }
+
+                true
+            } catch (e: Exception) {
+                Log.e(TAG, "Playback command failed", e)
+                false
+            }
+        }
     }
 
     private var activeController: MediaController? = null
@@ -51,29 +87,24 @@ class MusicListenerService : NotificationListenerService() {
     override fun onListenerConnected() {
         super.onListenerConnected()
 
-        Log.d(TAG, "LOCKWAVE music engine connected")
+        Log.d(TAG, "LOCKWAVE 4.0 engine connected")
 
         sessionManager = MusicSessionManager(this)
-
         refreshSessions()
     }
 
-    override fun onNotificationPosted(
-        sbn: StatusBarNotification?
-    ) {
+    override fun onNotificationPosted(sbn: StatusBarNotification?) {
         refreshSessions()
     }
 
-    override fun onNotificationRemoved(
-        sbn: StatusBarNotification?
-    ) {
+    override fun onNotificationRemoved(sbn: StatusBarNotification?) {
         refreshSessions()
     }
 
     private fun refreshSessions() {
         try {
             val manager = getSystemService(
-                MEDIA_SESSION_SERVICE
+                Context.MEDIA_SESSION_SERVICE
             ) as android.media.session.MediaSessionManager
 
             val sessions = manager.getActiveSessions(
@@ -83,27 +114,37 @@ class MusicListenerService : NotificationListenerService() {
                 )
             )
 
-            // Exclude LOCKWAVE's own media session.
             val externalSessions = sessions.filter {
                 it.packageName != packageName
             }
 
-            val selected = externalSessions.firstOrNull {
-                it.playbackState?.state ==
-                    PlaybackState.STATE_PLAYING
-            } ?: externalSessions.firstOrNull()
+            val existing = activeController?.let { current ->
+                externalSessions.firstOrNull {
+                    it.sessionToken == current.sessionToken
+                }
+            }
+
+            val selected =
+                externalSessions.firstOrNull {
+                    it.playbackState?.state ==
+                        PlaybackState.STATE_PLAYING
+                } ?: existing ?: externalSessions.firstOrNull {
+                    it.playbackState?.state != PlaybackState.STATE_NONE
+                } ?: externalSessions.firstOrNull()
 
             if (selected == null) {
                 clearCurrentTrack()
                 return
             }
 
-            if (activeController?.sessionToken !=
+            if (
+                activeController?.sessionToken !=
                 selected.sessionToken
             ) {
                 unregisterController()
 
                 activeController = selected
+                selectedController = selected
 
                 controllerCallback =
                     object : MediaController.Callback() {
@@ -125,9 +166,7 @@ class MusicListenerService : NotificationListenerService() {
                         }
                     }
 
-                selected.registerCallback(
-                    controllerCallback!!
-                )
+                selected.registerCallback(controllerCallback!!)
             }
 
             updateTrack(selected)
@@ -146,11 +185,15 @@ class MusicListenerService : NotificationListenerService() {
 
         currentTitle = metadata?.getString(
             MediaMetadata.METADATA_KEY_TITLE
-        ) ?: "Unknown track"
+        )?.takeIf {
+            it.isNotBlank()
+        } ?: "Unknown track"
 
         currentArtist = metadata?.getString(
             MediaMetadata.METADATA_KEY_ARTIST
-        ) ?: "Unknown artist"
+        )?.takeIf {
+            it.isNotBlank()
+        } ?: "Unknown artist"
 
         currentAlbum = metadata?.getString(
             MediaMetadata.METADATA_KEY_ALBUM
@@ -168,20 +211,19 @@ class MusicListenerService : NotificationListenerService() {
 
         playbackSpeed = playback?.playbackSpeed ?: 0f
 
-        isPlaying = playback?.state ==
-            PlaybackState.STATE_PLAYING
+        isPlaying =
+            playback?.state == PlaybackState.STATE_PLAYING
 
-        // Record when this position was reported.
-        // The UI can estimate progress between updates.
         lastPositionUpdateTime =
             SystemClock.elapsedRealtime()
 
-        // Keep LOCKWAVE's media session synchronized.
+        selectedController = controller
         sessionManager?.update(controller)
 
         Log.d(
             TAG,
             "Track: $currentTitle | " +
+                "Playing: $isPlaying | " +
                 "Position: $currentPosition | " +
                 "Duration: $currentDuration"
         )
@@ -196,12 +238,12 @@ class MusicListenerService : NotificationListenerService() {
         currentAlbum = ""
 
         isPlaying = false
-
         currentDuration = 0L
         currentPosition = 0L
         playbackSpeed = 0f
         lastPositionUpdateTime = 0L
 
+        selectedController = null
         sessionManager?.update(null)
     }
 
@@ -215,6 +257,7 @@ class MusicListenerService : NotificationListenerService() {
 
         controllerCallback = null
         activeController = null
+        selectedController = null
     }
 
     override fun onListenerDisconnected() {
