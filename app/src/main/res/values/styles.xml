@@ -1,7 +1,5 @@
 
-<?xml version="1.0" encoding="utf-8"?>
 <resources>
-
     <style
         name="AppTheme"
         parent="Theme.MaterialComponents.DayNight.NoActionBar">
@@ -11,7 +9,6 @@
         <item name="colorSecondary">#72B7FF</item>
 
         <item name="android:fontFamily">sans</item>
-
         <item name="android:windowLightStatusBar">false</item>
         <item name="android:windowLightNavigationBar">false</item>
 
@@ -23,5 +20,4 @@
         <item name="android:colorAccent">#72B7FF</item>
 
     </style>
-
 </resources>
