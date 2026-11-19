@@ -1,11 +1,16 @@
 
 package com.lockwave.player
 
+import android.Manifest
+import android.animation.ObjectAnimator
+import android.animation.ValueAnimator
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -14,6 +19,7 @@ import android.view.Gravity
 import android.view.HapticFeedbackConstants
 import android.view.View
 import android.view.ViewGroup
+import android.view.animation.AccelerateDecelerateInterpolator
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.SeekBar
@@ -22,11 +28,11 @@ import androidx.appcompat.app.AppCompatActivity
 
 class MainActivity : AppCompatActivity() {
 
-    private val bg = Color.rgb(6, 11, 23)
-    private val blue = Color.rgb(72, 145, 255)
-    private val cyan = Color.rgb(120, 211, 255)
-    private val white = Color.WHITE
-    private val muted = Color.rgb(143, 159, 185)
+    private val bg = Color.rgb(5, 10, 23)
+    private val blue = Color.rgb(69, 145, 255)
+    private val cyan = Color.rgb(133, 216, 255)
+    private val white = Color.rgb(246, 249, 255)
+    private val muted = Color.rgb(143, 160, 188)
 
     private val handler = Handler(Looper.getMainLooper())
 
@@ -40,6 +46,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var durationView: TextView
 
     private var isDragging = false
+    private var lastVisualPlayingState: Boolean? = null
+    private var pulseAnimator: ObjectAnimator? = null
 
     private fun dp(value: Int): Int =
         (value * resources.displayMetrics.density).toInt()
@@ -74,10 +82,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun gap(
-        parent: LinearLayout,
-        height: Int
-    ) {
+    private fun gap(parent: LinearLayout, height: Int) {
         parent.addView(
             View(this),
             LinearLayout.LayoutParams(1, dp(height))
@@ -116,24 +121,18 @@ class MainActivity : AppCompatActivity() {
         primary: Boolean,
         action: String
     ): TextView {
-
-        val button = makeText(
-            symbol,
-            size,
-            white,
-            true
-        ).apply {
+        return makeText(symbol, size, white, true).apply {
             gravity = Gravity.CENTER
             background = if (primary) {
                 glass(
-                    Color.rgb(43, 111, 220),
-                    Color.rgb(125, 190, 255),
+                    Color.rgb(40, 111, 224),
+                    Color.rgb(135, 195, 255),
                     50
                 )
             } else {
                 glass(
-                    Color.argb(50, 100, 135, 185),
-                    Color.argb(80, 170, 200, 255),
+                    Color.argb(55, 100, 140, 195),
+                    Color.argb(95, 155, 195, 255),
                     50
                 )
             }
@@ -144,33 +143,28 @@ class MainActivity : AppCompatActivity() {
             setOnClickListener {
                 sendMusicAction(action, source = this)
             }
+
+            layoutParams = LinearLayout.LayoutParams(
+                dp(width),
+                dp(height)
+            )
         }
-
-        button.layoutParams = LinearLayout.LayoutParams(
-            dp(width),
-            dp(height)
-        )
-
-        return button
     }
 
     private fun formatTime(milliseconds: Long): String {
-        val totalSeconds = (milliseconds / 1000L).coerceAtLeast(0L)
-        val minutes = totalSeconds / 60L
-        val seconds = totalSeconds % 60L
-
+        val seconds = (milliseconds / 1000L).coerceAtLeast(0L)
         return String.format(
             java.util.Locale.US,
             "%d:%02d",
-            minutes,
-            seconds
+            seconds / 60L,
+            seconds % 60L
         )
     }
 
     private val refreshPlayer = object : Runnable {
         override fun run() {
             updatePlayerUi()
-            handler.postDelayed(this, 400)
+            handler.postDelayed(this, 350L)
         }
     }
 
@@ -181,6 +175,27 @@ class MainActivity : AppCompatActivity() {
         window.navigationBarColor = bg
         window.decorView.systemUiVisibility = 0
 
+        requestNotificationPermission()
+
+        buildInterface()
+        updatePlayerUi()
+    }
+
+    private fun requestNotificationPermission() {
+        if (
+            Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            requestPermissions(
+                arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                410
+            )
+        }
+    }
+
+    private fun buildInterface() {
+
         val scroll = ScrollView(this).apply {
             isFillViewport = true
             setBackgroundColor(bg)
@@ -190,13 +205,14 @@ class MainActivity : AppCompatActivity() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
-            setPadding(dp(23), dp(30), dp(23), dp(22))
+            setPadding(dp(22), dp(34), dp(22), dp(24))
+
             background = GradientDrawable(
                 GradientDrawable.Orientation.TL_BR,
                 intArrayOf(
-                    Color.rgb(14, 28, 53),
+                    Color.rgb(17, 37, 72),
                     bg,
-                    Color.rgb(8, 16, 32)
+                    Color.rgb(8, 19, 39)
                 )
             )
         }
@@ -214,7 +230,7 @@ class MainActivity : AppCompatActivity() {
             white,
             true
         ).apply {
-            letterSpacing = 0.15f
+            letterSpacing = 0.12f
         }
 
         header.addView(
@@ -227,17 +243,17 @@ class MainActivity : AppCompatActivity() {
         )
 
         val version = makeText(
-            "3.0",
+            "4.0",
             11f,
             cyan,
             true
         ).apply {
             gravity = Gravity.CENTER
-            setPadding(dp(13), dp(7), dp(13), dp(7))
+            setPadding(dp(14), dp(8), dp(14), dp(8))
             background = glass(
-                Color.argb(40, 76, 151, 255),
-                Color.argb(100, 76, 151, 255),
-                30
+                Color.argb(55, 70, 145, 255),
+                Color.argb(130, 105, 175, 255),
+                40
             )
         }
 
@@ -250,59 +266,77 @@ class MainActivity : AppCompatActivity() {
             muted,
             true
         ).apply {
-            letterSpacing = 0.17f
+            letterSpacing = 0.18f
         }
 
-        val subtitleParams = LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.WRAP_CONTENT,
-            ViewGroup.LayoutParams.WRAP_CONTENT
-        ).apply {
-            topMargin = dp(9)
-        }
+        root.addView(
+            subtitle,
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply {
+                topMargin = dp(10)
+            }
+        )
 
-        root.addView(subtitle, subtitleParams)
+        gap(root, 38)
 
-        gap(root, 34)
-
-        // MAIN PLAYER CARD
+        // PLAYER CARD
 
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
-            setPadding(dp(21), dp(23), dp(21), dp(23))
-            background = glass(
-                Color.argb(165, 24, 40, 68),
-                Color.argb(75, 155, 195, 255),
-                30
-            )
-            elevation = dp(12).toFloat()
+            setPadding(dp(21), dp(25), dp(21), dp(25))
+
+            background = GradientDrawable(
+                GradientDrawable.Orientation.TL_BR,
+                intArrayOf(
+                    Color.argb(205, 35, 58, 94),
+                    Color.argb(175, 18, 34, 61),
+                    Color.argb(195, 24, 42, 72)
+                )
+            ).apply {
+                cornerRadius = dp(32).toFloat()
+                setStroke(
+                    dp(1),
+                    Color.argb(100, 145, 190, 255)
+                )
+            }
+
+            elevation = dp(15).toFloat()
         }
 
         val liveLabel = makeText(
-            "●  LIVE SESSION",
+            "●  LOCKWAVE LIVE",
             10f,
             cyan,
             true
         ).apply {
-            letterSpacing = 0.17f
+            letterSpacing = 0.16f
+            background = glass(
+                Color.argb(35, 90, 160, 255),
+                Color.argb(75, 125, 185, 255),
+                30
+            )
+            setPadding(dp(13), dp(8), dp(13), dp(8))
         }
 
         card.addView(liveLabel)
 
-        gap(card, 22)
+        gap(card, 27)
 
         heroIcon = makeText(
             "♫",
-            82f,
+            86f,
             blue,
             true
         ).apply {
             gravity = Gravity.CENTER
             setShadowLayer(
-                dp(22).toFloat(),
+                dp(24).toFloat(),
                 0f,
                 0f,
-                Color.argb(160, 45, 125, 255)
+                Color.argb(190, 45, 125, 255)
             )
         }
 
@@ -310,15 +344,15 @@ class MainActivity : AppCompatActivity() {
             heroIcon,
             LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
-                dp(105)
+                dp(115)
             )
         )
 
-        gap(card, 18)
+        gap(card, 20)
 
         titleView = makeText(
             "Nothing playing",
-            23f,
+            24f,
             white,
             true
         ).apply {
@@ -343,16 +377,17 @@ class MainActivity : AppCompatActivity() {
             maxLines = 1
         }
 
-        val artistParams = LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT,
-            ViewGroup.LayoutParams.WRAP_CONTENT
-        ).apply {
-            topMargin = dp(8)
-        }
+        card.addView(
+            artistView,
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply {
+                topMargin = dp(9)
+            }
+        )
 
-        card.addView(artistView, artistParams)
-
-        gap(card, 17)
+        gap(card, 18)
 
         statusView = makeText(
             "WAITING FOR MUSIC",
@@ -365,9 +400,9 @@ class MainActivity : AppCompatActivity() {
 
         card.addView(statusView)
 
-        gap(card, 25)
+        gap(card, 27)
 
-        // PROGRESS BAR
+        // PROGRESS
 
         seekBar = SeekBar(this).apply {
             max = 1000
@@ -378,7 +413,7 @@ class MainActivity : AppCompatActivity() {
             thumbTintList = ColorStateList.valueOf(cyan)
             progressBackgroundTintList =
                 ColorStateList.valueOf(
-                    Color.argb(75, 170, 195, 230)
+                    Color.argb(80, 165, 195, 235)
                 )
 
             setOnSeekBarChangeListener(
@@ -393,10 +428,9 @@ class MainActivity : AppCompatActivity() {
                             val duration =
                                 MusicListenerService.currentDuration
 
-                            val position =
+                            elapsedView.text = formatTime(
                                 duration * progress / 1000L
-
-                            elapsedView.text = formatTime(position)
+                            )
                         }
                     }
 
@@ -433,7 +467,7 @@ class MainActivity : AppCompatActivity() {
             seekBar,
             LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
-                dp(35)
+                dp(42)
             )
         )
 
@@ -442,19 +476,8 @@ class MainActivity : AppCompatActivity() {
             gravity = Gravity.CENTER_VERTICAL
         }
 
-        elapsedView = makeText(
-            "0:00",
-            11f,
-            muted,
-            true
-        )
-
-        durationView = makeText(
-            "0:00",
-            11f,
-            muted,
-            true
-        )
+        elapsedView = makeText("0:00", 11f, muted, true)
+        durationView = makeText("0:00", 11f, muted, true)
 
         timeRow.addView(
             elapsedView,
@@ -466,14 +489,13 @@ class MainActivity : AppCompatActivity() {
         )
 
         timeRow.addView(durationView)
-
         card.addView(timeRow)
 
-        gap(card, 23)
+        gap(card, 25)
 
         val separator = View(this).apply {
             setBackgroundColor(
-                Color.argb(50, 170, 200, 255)
+                Color.argb(65, 165, 195, 240)
             )
         }
 
@@ -485,57 +507,56 @@ class MainActivity : AppCompatActivity() {
             )
         )
 
-        gap(card, 22)
+        gap(card, 24)
 
-        // PLAYBACK CONTROLS
+        // CONTROLS
 
         val controls = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
         }
 
-        val previous = controlButton(
-            "|◀",
-            22f,
-            55,
-            55,
-            false,
-            MusicSessionManager.ACTION_PREVIOUS
+        controls.addView(
+            controlButton(
+                "|◀", 22f, 55, 55, false,
+                MusicSessionManager.ACTION_PREVIOUS
+            )
         )
-
-        controls.addView(previous)
 
         controls.addView(
             View(this),
-            LinearLayout.LayoutParams(dp(22), 1)
+            LinearLayout.LayoutParams(dp(20), 1)
         )
 
         playButton = controlButton(
-            "▶",
-            27f,
-            70,
-            70,
-            true,
+            "▶", 27f, 72, 72, true,
             MusicSessionManager.ACTION_PLAY
         )
+
+        playButton.setOnClickListener {
+            sendMusicAction(
+                if (MusicListenerService.isPlaying) {
+                    MusicSessionManager.ACTION_PAUSE
+                } else {
+                    MusicSessionManager.ACTION_PLAY
+                },
+                source = playButton
+            )
+        }
 
         controls.addView(playButton)
 
         controls.addView(
             View(this),
-            LinearLayout.LayoutParams(dp(22), 1)
+            LinearLayout.LayoutParams(dp(20), 1)
         )
 
-        val next = controlButton(
-            "▶|",
-            22f,
-            55,
-            55,
-            false,
-            MusicSessionManager.ACTION_NEXT
+        controls.addView(
+            controlButton(
+                "▶|", 22f, 55, 55, false,
+                MusicSessionManager.ACTION_NEXT
+            )
         )
-
-        controls.addView(next)
 
         card.addView(controls)
 
@@ -550,13 +571,13 @@ class MainActivity : AppCompatActivity() {
         gap(root, 28)
 
         val footer = makeText(
-            "CRAFTED FOR THE SOUND.",
+            "MADE FOR THE MUSIC.",
             10f,
             muted,
             true
         ).apply {
-            letterSpacing = 0.2f
             gravity = Gravity.CENTER
+            letterSpacing = 0.2f
         }
 
         root.addView(
@@ -569,8 +590,6 @@ class MainActivity : AppCompatActivity() {
 
         scroll.addView(root)
         setContentView(scroll)
-
-        updatePlayerUi()
     }
 
     private fun updatePlayerUi() {
@@ -579,17 +598,10 @@ class MainActivity : AppCompatActivity() {
         val artist = MusicListenerService.currentArtist
         val playing = MusicListenerService.isPlaying
 
-        val duration =
-            MusicListenerService.currentDuration
-
-        val basePosition =
-            MusicListenerService.currentPosition
-
-        val updateTime =
-            MusicListenerService.lastPositionUpdateTime
-
-        val speed =
-            MusicListenerService.playbackSpeed
+        val duration = MusicListenerService.currentDuration
+        val basePosition = MusicListenerService.currentPosition
+        val updateTime = MusicListenerService.lastPositionUpdateTime
+        val speed = MusicListenerService.playbackSpeed
 
         if (title == "Nothing playing") {
 
@@ -667,15 +679,31 @@ class MainActivity : AppCompatActivity() {
             durationView.text = formatTime(duration)
         }
 
-        playButton.setOnClickListener {
-            sendMusicAction(
-                if (MusicListenerService.isPlaying) {
-                    MusicSessionManager.ACTION_PAUSE
-                } else {
-                    MusicSessionManager.ACTION_PLAY
-                },
-                source = playButton
-            )
+        updatePlayingAnimation(playing)
+    }
+
+    private fun updatePlayingAnimation(playing: Boolean) {
+
+        if (lastVisualPlayingState == playing) return
+        lastVisualPlayingState = playing
+
+        pulseAnimator?.cancel()
+        pulseAnimator = null
+        heroIcon.translationY = 0f
+
+        if (playing) {
+            pulseAnimator = ObjectAnimator.ofFloat(
+                heroIcon,
+                "translationY",
+                0f,
+                -dp(5).toFloat(),
+                0f
+            ).apply {
+                duration = 2300L
+                repeatCount = ValueAnimator.INFINITE
+                interpolator = AccelerateDecelerateInterpolator()
+                start()
+            }
         }
     }
 
@@ -692,6 +720,8 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         handler.removeCallbacks(refreshPlayer)
+        pulseAnimator?.cancel()
+        pulseAnimator = null
         super.onDestroy()
     }
 }
