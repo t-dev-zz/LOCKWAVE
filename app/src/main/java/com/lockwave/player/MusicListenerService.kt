@@ -3,10 +3,11 @@ package com.lockwave.player
 
 import android.content.ComponentName
 import android.content.Context
-import android.content.Intent
-import android.media.MediaMetadata
 import android.media.session.MediaController
+import android.media.session.MediaSessionManager
 import android.media.session.PlaybackState
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
@@ -16,31 +17,33 @@ class MusicListenerService : NotificationListenerService() {
 
     companion object {
         private const val TAG = "LOCKWAVE"
+        private const val REFRESH_DELAY = 350L
 
-        var currentTitle = "Nothing playing"
+        @Volatile var currentTitle = "Nothing playing"
             private set
 
-        var currentArtist = ""
+        @Volatile var currentArtist = ""
             private set
 
-        var currentAlbum = ""
+        @Volatile var currentAlbum = ""
             private set
 
-        var isPlaying = false
+        @Volatile var isPlaying = false
             private set
 
-        var currentDuration = 0L
+        @Volatile var currentDuration = 0L
             private set
 
-        var currentPosition = 0L
+        @Volatile var currentPosition = 0L
             private set
 
-        var playbackSpeed = 0f
+        @Volatile var playbackSpeed = 0f
             private set
 
-        var lastPositionUpdateTime = 0L
+        @Volatile var lastPositionUpdateTime = 0L
             private set
 
+        @Volatile
         private var selectedController: MediaController? = null
 
         fun dispatchAction(
@@ -50,23 +53,25 @@ class MusicListenerService : NotificationListenerService() {
             val controller = selectedController ?: return false
 
             return try {
+                val controls = controller.transportControls
+
                 when (action) {
                     MusicSessionManager.ACTION_PLAY ->
-                        controller.transportControls.play()
+                        controls.play()
 
                     MusicSessionManager.ACTION_PAUSE ->
-                        controller.transportControls.pause()
+                        controls.pause()
 
                     MusicSessionManager.ACTION_NEXT ->
-                        controller.transportControls.skipToNext()
+                        controls.skipToNext()
 
                     MusicSessionManager.ACTION_PREVIOUS ->
-                        controller.transportControls.skipToPrevious()
+                        controls.skipToPrevious()
 
                     MusicSessionManager.ACTION_SEEK -> {
                         val target = position ?: return false
                         if (target < 0L) return false
-                        controller.transportControls.seekTo(target)
+                        controls.seekTo(target)
                     }
 
                     else -> return false
@@ -80,156 +85,217 @@ class MusicListenerService : NotificationListenerService() {
         }
     }
 
+    private val handler = Handler(Looper.getMainLooper())
+
     private var activeController: MediaController? = null
     private var controllerCallback: MediaController.Callback? = null
+
     private var sessionManager: MusicSessionManager? = null
+    private var platformSessionManager: MediaSessionManager? = null
+
+    private var sessionsListener:
+        MediaSessionManager.OnActiveSessionsChangedListener? = null
+
+    private var listenerRegistered = false
+
+    private val refreshRunnable = Runnable {
+        refreshSessions()
+    }
+
+    private fun scheduleRefresh() {
+        handler.removeCallbacks(refreshRunnable)
+        handler.postDelayed(refreshRunnable, REFRESH_DELAY)
+    }
 
     override fun onListenerConnected() {
         super.onListenerConnected()
 
-        Log.d(TAG, "LOCKWAVE 4.0 engine connected")
+        Log.d(TAG, "LOCKWAVE 5.0 connected")
 
         sessionManager = MusicSessionManager(this)
-        refreshSessions()
+
+        try {
+            platformSessionManager = getSystemService(
+                Context.MEDIA_SESSION_SERVICE
+            ) as MediaSessionManager
+
+            val component = ComponentName(
+                this,
+                MusicListenerService::class.java
+            )
+
+            sessionsListener =
+                MediaSessionManager.OnActiveSessionsChangedListener {
+                    scheduleRefresh()
+                }
+
+            platformSessionManager?.addOnActiveSessionsChangedListener(
+                sessionsListener,
+                component,
+                handler
+            )
+
+            listenerRegistered = true
+
+            refreshSessions()
+
+        } catch (e: SecurityException) {
+            Log.e(TAG, "Notification access is required", e)
+        } catch (e: Exception) {
+            Log.e(TAG, "Could not register session listener", e)
+        }
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
-        refreshSessions()
+        if (sbn?.packageName == packageName) return
+        scheduleRefresh()
     }
 
     override fun onNotificationRemoved(sbn: StatusBarNotification?) {
-        refreshSessions()
+        if (sbn?.packageName == packageName) return
+        scheduleRefresh()
     }
 
     private fun refreshSessions() {
-        try {
-            val manager = getSystemService(
-                Context.MEDIA_SESSION_SERVICE
-            ) as android.media.session.MediaSessionManager
+        val manager = platformSessionManager ?: return
 
-            val sessions = manager.getActiveSessions(
-                ComponentName(
-                    this,
-                    MusicListenerService::class.java
-                )
+        try {
+            val component = ComponentName(
+                this,
+                MusicListenerService::class.java
             )
 
-            val externalSessions = sessions.filter {
-                it.packageName != packageName
-            }
+            val sessions = manager.getActiveSessions(component)
+                .filter { it.packageName != packageName }
 
-            val existing = activeController?.let { current ->
-                externalSessions.firstOrNull {
-                    it.sessionToken == current.sessionToken
-                }
+            val existingToken = activeController?.sessionToken
+
+            val existing = sessions.firstOrNull {
+                it.sessionToken == existingToken
             }
 
             val selected =
-                externalSessions.firstOrNull {
+                sessions.firstOrNull {
                     it.playbackState?.state ==
                         PlaybackState.STATE_PLAYING
-                } ?: existing ?: externalSessions.firstOrNull {
-                    it.playbackState?.state != PlaybackState.STATE_NONE
-                } ?: externalSessions.firstOrNull()
+                } ?: existing
+                ?: sessions.firstOrNull {
+                    it.playbackState?.state !=
+                        PlaybackState.STATE_NONE
+                }
+                ?: sessions.firstOrNull()
 
             if (selected == null) {
                 clearCurrentTrack()
                 return
             }
 
-            if (
-                activeController?.sessionToken !=
-                selected.sessionToken
-            ) {
+            val sameSession =
+                activeController?.sessionToken ==
+                    selected.sessionToken
+
+            if (!sameSession) {
                 unregisterController()
 
                 activeController = selected
                 selectedController = selected
 
-                controllerCallback =
-                    object : MediaController.Callback() {
+                val callback = object : MediaController.Callback() {
 
-                        override fun onMetadataChanged(
-                            metadata: MediaMetadata?
+                    override fun onMetadataChanged(
+                        metadata: android.media.MediaMetadata?
+                    ) {
+                        if (activeController?.sessionToken ==
+                            selected.sessionToken
                         ) {
                             updateTrack(selected)
-                        }
-
-                        override fun onPlaybackStateChanged(
-                            state: PlaybackState?
-                        ) {
-                            updateTrack(selected)
-                        }
-
-                        override fun onSessionDestroyed() {
-                            refreshSessions()
                         }
                     }
 
-                selected.registerCallback(controllerCallback!!)
+                    override fun onPlaybackStateChanged(
+                        state: PlaybackState?
+                    ) {
+                        if (activeController?.sessionToken ==
+                            selected.sessionToken
+                        ) {
+                            updateTrack(selected)
+                        }
+                    }
+
+                    override fun onSessionDestroyed() {
+                        scheduleRefresh()
+                    }
+                }
+
+                controllerCallback = callback
+                selected.registerCallback(callback)
             }
 
+            selectedController = selected
             updateTrack(selected)
 
         } catch (e: SecurityException) {
-            Log.e(TAG, "Notification access required", e)
+            Log.e(TAG, "Session access denied", e)
         } catch (e: Exception) {
-            Log.e(TAG, "Session detection failed", e)
+            Log.e(TAG, "Session refresh failed", e)
         }
     }
 
     private fun updateTrack(controller: MediaController) {
-
         val metadata = controller.metadata
         val playback = controller.playbackState
 
-        currentTitle = metadata?.getString(
-            MediaMetadata.METADATA_KEY_TITLE
-        )?.takeIf {
-            it.isNotBlank()
-        } ?: "Unknown track"
+        val title = metadata
+            ?.getString(android.media.MediaMetadata.METADATA_KEY_TITLE)
+            ?.takeIf { it.isNotBlank() }
+            ?: "Unknown track"
 
-        currentArtist = metadata?.getString(
-            MediaMetadata.METADATA_KEY_ARTIST
-        )?.takeIf {
-            it.isNotBlank()
-        } ?: "Unknown artist"
+        val artist = metadata
+            ?.getString(android.media.MediaMetadata.METADATA_KEY_ARTIST)
+            ?.takeIf { it.isNotBlank() }
+            ?: "Unknown artist"
 
-        currentAlbum = metadata?.getString(
-            MediaMetadata.METADATA_KEY_ALBUM
-        ) ?: ""
+        val album = metadata
+            ?.getString(android.media.MediaMetadata.METADATA_KEY_ALBUM)
+            ?: ""
 
-        currentDuration = (
+        val duration = (
             metadata?.getLong(
-                MediaMetadata.METADATA_KEY_DURATION
+                android.media.MediaMetadata.METADATA_KEY_DURATION
             ) ?: 0L
         ).coerceAtLeast(0L)
 
-        currentPosition = (
+        val position = (
             playback?.position ?: 0L
         ).coerceAtLeast(0L)
 
-        playbackSpeed = playback?.playbackSpeed ?: 0f
+        val speed = playback?.playbackSpeed ?: 0f
 
-        isPlaying =
+        val playing =
             playback?.state == PlaybackState.STATE_PLAYING
 
-        lastPositionUpdateTime =
-            SystemClock.elapsedRealtime()
+        currentTitle = title
+        currentArtist = artist
+        currentAlbum = album
+        currentDuration = duration
+        currentPosition = position
+        playbackSpeed = speed
+        isPlaying = playing
+
+        lastPositionUpdateTime = SystemClock.elapsedRealtime()
 
         selectedController = controller
-        sessionManager?.update(controller)
 
-        Log.d(
-            TAG,
-            "Track: $currentTitle | " +
-                "Playing: $isPlaying | " +
-                "Position: $currentPosition | " +
-                "Duration: $currentDuration"
-        )
+        sessionManager?.update(controller)
     }
 
     private fun clearCurrentTrack() {
+        if (
+            activeController == null &&
+            currentTitle == "Nothing playing"
+        ) {
+            return
+        }
 
         unregisterController()
 
@@ -244,13 +310,14 @@ class MusicListenerService : NotificationListenerService() {
         lastPositionUpdateTime = 0L
 
         selectedController = null
+
         sessionManager?.update(null)
     }
 
     private fun unregisterController() {
         try {
-            controllerCallback?.let {
-                activeController?.unregisterCallback(it)
+            controllerCallback?.let { callback ->
+                activeController?.unregisterCallback(callback)
             }
         } catch (_: Exception) {
         }
@@ -260,16 +327,39 @@ class MusicListenerService : NotificationListenerService() {
         selectedController = null
     }
 
+    private fun unregisterSessionListener() {
+        if (!listenerRegistered) return
+
+        try {
+            sessionsListener?.let {
+                platformSessionManager
+                    ?.removeOnActiveSessionsChangedListener(it)
+            }
+        } catch (_: Exception) {
+        }
+
+        sessionsListener = null
+        listenerRegistered = false
+    }
+
     override fun onListenerDisconnected() {
+        handler.removeCallbacksAndMessages(null)
+
+        unregisterSessionListener()
         unregisterController()
 
         sessionManager?.release()
         sessionManager = null
 
+        platformSessionManager = null
+
         super.onListenerDisconnected()
     }
 
     override fun onDestroy() {
+        handler.removeCallbacksAndMessages(null)
+
+        unregisterSessionListener()
         unregisterController()
 
         sessionManager?.release()
