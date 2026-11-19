@@ -1,36 +1,45 @@
 
 package com.lockwave.player
 
-import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
 import android.content.Intent
+import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
 import android.view.Gravity
 import android.view.HapticFeedbackConstants
 import android.view.View
 import android.view.ViewGroup
 import android.widget.LinearLayout
+import android.widget.ScrollView
+import android.widget.SeekBar
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 
 class MainActivity : AppCompatActivity() {
 
-    private val bg = Color.rgb(5, 9, 19)
-    private val blue = Color.rgb(76, 151, 255)
-    private val cyan = Color.rgb(115, 207, 255)
-    private val muted = Color.rgb(143, 159, 185)
+    private val bg = Color.rgb(6, 11, 23)
+    private val blue = Color.rgb(72, 145, 255)
+    private val cyan = Color.rgb(120, 211, 255)
     private val white = Color.WHITE
+    private val muted = Color.rgb(143, 159, 185)
 
     private val handler = Handler(Looper.getMainLooper())
 
     private lateinit var titleView: TextView
     private lateinit var artistView: TextView
     private lateinit var statusView: TextView
-    private lateinit var playButton: TextView
     private lateinit var heroIcon: TextView
+    private lateinit var playButton: TextView
+    private lateinit var seekBar: SeekBar
+    private lateinit var elapsedView: TextView
+    private lateinit var durationView: TextView
+
+    private var isDragging = false
 
     private fun dp(value: Int): Int =
         (value * resources.displayMetrics.density).toInt()
@@ -65,7 +74,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun addGap(
+    private fun gap(
         parent: LinearLayout,
         height: Int
     ) {
@@ -75,8 +84,12 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
-    private fun sendMusicAction(action: String, view: View) {
-        view.performHapticFeedback(
+    private fun sendMusicAction(
+        action: String,
+        position: Long? = null,
+        source: View? = null
+    ) {
+        source?.performHapticFeedback(
             HapticFeedbackConstants.VIRTUAL_KEY
         )
 
@@ -85,38 +98,79 @@ class MainActivity : AppCompatActivity() {
             MusicActionReceiver::class.java
         ).setAction(action)
 
+        if (position != null) {
+            intent.putExtra(
+                MusicSessionManager.EXTRA_POSITION,
+                position
+            )
+        }
+
         sendBroadcast(intent)
     }
 
     private fun controlButton(
         symbol: String,
         size: Float,
-        background: GradientDrawable,
-        action: String,
         width: Int,
-        height: Int
+        height: Int,
+        primary: Boolean,
+        action: String
     ): TextView {
-        return makeText(symbol, size, white, true).apply {
+
+        val button = makeText(
+            symbol,
+            size,
+            white,
+            true
+        ).apply {
             gravity = Gravity.CENTER
-            this.background = background
+            background = if (primary) {
+                glass(
+                    Color.rgb(43, 111, 220),
+                    Color.rgb(125, 190, 255),
+                    50
+                )
+            } else {
+                glass(
+                    Color.argb(50, 100, 135, 185),
+                    Color.argb(80, 170, 200, 255),
+                    50
+                )
+            }
+
             isClickable = true
             isFocusable = true
 
             setOnClickListener {
-                sendMusicAction(action, this)
+                sendMusicAction(action, source = this)
             }
-
-            layoutParams = LinearLayout.LayoutParams(
-                dp(width),
-                dp(height)
-            )
         }
+
+        button.layoutParams = LinearLayout.LayoutParams(
+            dp(width),
+            dp(height)
+        )
+
+        return button
+    }
+
+    private fun formatTime(milliseconds: Long): String {
+        val totalSeconds = (milliseconds / 1000L).coerceAtLeast(0L)
+        val minutes = totalSeconds / 60L
+        val seconds = totalSeconds % 60L
+
+        return String.format(
+            java.util.Locale.US,
+            "%d:%02d",
+            minutes,
+            seconds
+        )
     }
 
     private val refreshPlayer = object : Runnable {
         override fun run() {
             updatePlayerUi()
-            handler.postDelayed(this, 500)
+            handler.postDelayed(this, 400)
         }
     }
 
@@ -127,23 +181,27 @@ class MainActivity : AppCompatActivity() {
         window.navigationBarColor = bg
         window.decorView.systemUiVisibility = 0
 
+        val scroll = ScrollView(this).apply {
+            fillViewport = true
+            setBackgroundColor(bg)
+            isVerticalScrollBarEnabled = false
+        }
+
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
-            setPadding(dp(24), dp(35), dp(24), dp(20))
-            setBackground(
-                GradientDrawable(
-                    GradientDrawable.Orientation.TL_BR,
-                    intArrayOf(
-                        Color.rgb(13, 25, 48),
-                        bg,
-                        Color.rgb(8, 16, 32)
-                    )
+            setPadding(dp(23), dp(30), dp(23), dp(22))
+            background = GradientDrawable(
+                GradientDrawable.Orientation.TL_BR,
+                intArrayOf(
+                    Color.rgb(14, 28, 53),
+                    bg,
+                    Color.rgb(8, 16, 32)
                 )
             )
         }
 
-        // Header
+        // HEADER
 
         val header = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -152,11 +210,11 @@ class MainActivity : AppCompatActivity() {
 
         val brand = makeText(
             "LOCKWAVE",
-            24f,
+            25f,
             white,
             true
         ).apply {
-            letterSpacing = 0.16f
+            letterSpacing = 0.15f
         }
 
         header.addView(
@@ -169,7 +227,7 @@ class MainActivity : AppCompatActivity() {
         )
 
         val version = makeText(
-            "2.0",
+            "3.0",
             11f,
             cyan,
             true
@@ -177,8 +235,8 @@ class MainActivity : AppCompatActivity() {
             gravity = Gravity.CENTER
             setPadding(dp(13), dp(7), dp(13), dp(7))
             background = glass(
-                Color.argb(35, 76, 151, 255),
-                Color.argb(90, 76, 151, 255),
+                Color.argb(40, 76, 151, 255),
+                Color.argb(100, 76, 151, 255),
                 30
             )
         }
@@ -204,28 +262,21 @@ class MainActivity : AppCompatActivity() {
 
         root.addView(subtitle, subtitleParams)
 
-        // Flexible space
+        gap(root, 34)
 
-        root.addView(
-            View(this),
-            LinearLayout.LayoutParams(1, 0, 1f)
-        )
-
-        // Player glass panel
+        // MAIN PLAYER CARD
 
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
-            setPadding(dp(22), dp(25), dp(22), dp(25))
+            setPadding(dp(21), dp(23), dp(21), dp(23))
             background = glass(
-                Color.argb(155, 24, 39, 66),
-                Color.argb(65, 155, 195, 255),
+                Color.argb(165, 24, 40, 68),
+                Color.argb(75, 155, 195, 255),
                 30
             )
             elevation = dp(12).toFloat()
         }
-
-        // Live indicator
 
         val liveLabel = makeText(
             "●  LIVE SESSION",
@@ -233,18 +284,16 @@ class MainActivity : AppCompatActivity() {
             cyan,
             true
         ).apply {
-            letterSpacing = 0.16f
+            letterSpacing = 0.17f
         }
 
         card.addView(liveLabel)
 
-        addGap(card, 24)
-
-        // Music symbol
+        gap(card, 22)
 
         heroIcon = makeText(
             "♫",
-            86f,
+            82f,
             blue,
             true
         ).apply {
@@ -253,7 +302,7 @@ class MainActivity : AppCompatActivity() {
                 dp(22).toFloat(),
                 0f,
                 0f,
-                Color.argb(150, 45, 125, 255)
+                Color.argb(160, 45, 125, 255)
             )
         }
 
@@ -261,13 +310,11 @@ class MainActivity : AppCompatActivity() {
             heroIcon,
             LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
-                dp(112)
+                dp(105)
             )
         )
 
-        addGap(card, 18)
-
-        // Track information
+        gap(card, 18)
 
         titleView = makeText(
             "Nothing playing",
@@ -287,13 +334,6 @@ class MainActivity : AppCompatActivity() {
             )
         )
 
-        val artistParams = LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT,
-            ViewGroup.LayoutParams.WRAP_CONTENT
-        ).apply {
-            topMargin = dp(8)
-        }
-
         artistView = makeText(
             "Your next song will appear here.",
             13f,
@@ -303,11 +343,16 @@ class MainActivity : AppCompatActivity() {
             maxLines = 1
         }
 
+        val artistParams = LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT
+        ).apply {
+            topMargin = dp(8)
+        }
+
         card.addView(artistView, artistParams)
 
-        addGap(card, 20)
-
-        // Playback status
+        gap(card, 17)
 
         statusView = makeText(
             "WAITING FOR MUSIC",
@@ -315,18 +360,120 @@ class MainActivity : AppCompatActivity() {
             muted,
             true
         ).apply {
-            letterSpacing = 0.18f
+            letterSpacing = 0.17f
         }
 
         card.addView(statusView)
 
-        addGap(card, 23)
+        gap(card, 25)
 
-        // Separator
+        // PROGRESS BAR
+
+        seekBar = SeekBar(this).apply {
+            max = 1000
+            progress = 0
+            isEnabled = false
+
+            progressTintList = ColorStateList.valueOf(blue)
+            thumbTintList = ColorStateList.valueOf(cyan)
+            progressBackgroundTintList =
+                ColorStateList.valueOf(
+                    Color.argb(75, 170, 195, 230)
+                )
+
+            setOnSeekBarChangeListener(
+                object : SeekBar.OnSeekBarChangeListener {
+
+                    override fun onProgressChanged(
+                        bar: SeekBar?,
+                        progress: Int,
+                        fromUser: Boolean
+                    ) {
+                        if (fromUser) {
+                            val duration =
+                                MusicListenerService.currentDuration
+
+                            val position =
+                                duration * progress / 1000L
+
+                            elapsedView.text = formatTime(position)
+                        }
+                    }
+
+                    override fun onStartTrackingTouch(
+                        bar: SeekBar?
+                    ) {
+                        isDragging = true
+                    }
+
+                    override fun onStopTrackingTouch(
+                        bar: SeekBar?
+                    ) {
+                        val duration =
+                            MusicListenerService.currentDuration
+
+                        if (duration > 0L) {
+                            val position =
+                                duration * seekBar.progress / 1000L
+
+                            sendMusicAction(
+                                MusicSessionManager.ACTION_SEEK,
+                                position,
+                                seekBar
+                            )
+                        }
+
+                        isDragging = false
+                    }
+                }
+            )
+        }
+
+        card.addView(
+            seekBar,
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(35)
+            )
+        )
+
+        val timeRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+
+        elapsedView = makeText(
+            "0:00",
+            11f,
+            muted,
+            true
+        )
+
+        durationView = makeText(
+            "0:00",
+            11f,
+            muted,
+            true
+        )
+
+        timeRow.addView(
+            elapsedView,
+            LinearLayout.LayoutParams(
+                0,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                1f
+            )
+        )
+
+        timeRow.addView(durationView)
+
+        card.addView(timeRow)
+
+        gap(card, 23)
 
         val separator = View(this).apply {
             setBackgroundColor(
-                Color.argb(45, 170, 200, 255)
+                Color.argb(50, 170, 200, 255)
             )
         }
 
@@ -338,9 +485,9 @@ class MainActivity : AppCompatActivity() {
             )
         )
 
-        addGap(card, 20)
+        gap(card, 22)
 
-        // Playback controls
+        // PLAYBACK CONTROLS
 
         val controls = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -349,57 +496,43 @@ class MainActivity : AppCompatActivity() {
 
         val previous = controlButton(
             "|◀",
-            23f,
-            glass(
-                Color.argb(45, 100, 135, 185),
-                Color.argb(70, 170, 200, 255),
-                50
-            ),
-            MusicSessionManager.ACTION_PREVIOUS,
-            54,
-            54
+            22f,
+            55,
+            55,
+            false,
+            MusicSessionManager.ACTION_PREVIOUS
         )
 
         controls.addView(previous)
 
-        val controlGap1 = View(this)
         controls.addView(
-            controlGap1,
-            LinearLayout.LayoutParams(dp(24), 1)
+            View(this),
+            LinearLayout.LayoutParams(dp(22), 1)
         )
 
         playButton = controlButton(
             "▶",
             27f,
-            glass(
-                Color.rgb(44, 112, 220),
-                Color.rgb(110, 180, 255),
-                50
-            ),
-            MusicSessionManager.ACTION_PLAY,
             70,
-            70
+            70,
+            true,
+            MusicSessionManager.ACTION_PLAY
         )
 
         controls.addView(playButton)
 
-        val controlGap2 = View(this)
         controls.addView(
-            controlGap2,
-            LinearLayout.LayoutParams(dp(24), 1)
+            View(this),
+            LinearLayout.LayoutParams(dp(22), 1)
         )
 
         val next = controlButton(
             "▶|",
-            23f,
-            glass(
-                Color.argb(45, 100, 135, 185),
-                Color.argb(70, 170, 200, 255),
-                50
-            ),
-            MusicSessionManager.ACTION_NEXT,
-            54,
-            54
+            22f,
+            55,
+            55,
+            false,
+            MusicSessionManager.ACTION_NEXT
         )
 
         controls.addView(next)
@@ -414,12 +547,7 @@ class MainActivity : AppCompatActivity() {
             )
         )
 
-        // Bottom section
-
-        root.addView(
-            View(this),
-            LinearLayout.LayoutParams(1, 0, 1f)
-        )
+        gap(root, 28)
 
         val footer = makeText(
             "CRAFTED FOR THE SOUND.",
@@ -439,7 +567,8 @@ class MainActivity : AppCompatActivity() {
             )
         )
 
-        setContentView(root)
+        scroll.addView(root)
+        setContentView(scroll)
 
         updatePlayerUi()
     }
@@ -450,30 +579,41 @@ class MainActivity : AppCompatActivity() {
         val artist = MusicListenerService.currentArtist
         val playing = MusicListenerService.isPlaying
 
+        val duration =
+            MusicListenerService.currentDuration
+
+        val basePosition =
+            MusicListenerService.currentPosition
+
+        val updateTime =
+            MusicListenerService.lastPositionUpdateTime
+
+        val speed =
+            MusicListenerService.playbackSpeed
+
         if (title == "Nothing playing") {
 
             titleView.text = "Nothing playing"
             artistView.text = "Your next song will appear here."
 
             heroIcon.text = "♫"
+
             statusView.text = "WAITING FOR MUSIC"
             statusView.setTextColor(muted)
 
+            seekBar.isEnabled = false
+            seekBar.progress = 0
+
+            elapsedView.text = "0:00"
+            durationView.text = "0:00"
+
             playButton.text = "▶"
-            playButton.setOnClickListener {
-                sendMusicAction(
-                    MusicSessionManager.ACTION_PLAY,
-                    playButton
-                )
-            }
 
         } else {
 
             titleView.text = title
 
-            artistView.text = if (artist.isNotBlank()) {
-                artist
-            } else {
+            artistView.text = artist.ifBlank {
                 MusicListenerService.currentAlbum.ifBlank {
                     "Unknown artist"
                 }
@@ -493,16 +633,49 @@ class MainActivity : AppCompatActivity() {
 
             playButton.text = if (playing) "Ⅱ" else "▶"
 
-            playButton.setOnClickListener {
-                sendMusicAction(
-                    if (MusicListenerService.isPlaying) {
-                        MusicSessionManager.ACTION_PAUSE
-                    } else {
-                        MusicSessionManager.ACTION_PLAY
-                    },
-                    playButton
-                )
+            val estimatedPosition = if (
+                playing && updateTime > 0L
+            ) {
+                basePosition +
+                    (
+                        (SystemClock.elapsedRealtime() - updateTime) *
+                            speed
+                    ).toLong()
+            } else {
+                basePosition
             }
+
+            val position = estimatedPosition.coerceIn(
+                0L,
+                duration.coerceAtLeast(0L)
+            )
+
+            if (!isDragging) {
+                seekBar.isEnabled = duration > 0L
+
+                seekBar.progress = if (duration > 0L) {
+                    ((position * 1000L) / duration)
+                        .toInt()
+                        .coerceIn(0, 1000)
+                } else {
+                    0
+                }
+
+                elapsedView.text = formatTime(position)
+            }
+
+            durationView.text = formatTime(duration)
+        }
+
+        playButton.setOnClickListener {
+            sendMusicAction(
+                if (MusicListenerService.isPlaying) {
+                    MusicSessionManager.ACTION_PAUSE
+                } else {
+                    MusicSessionManager.ACTION_PLAY
+                },
+                source = playButton
+            )
         }
     }
 
