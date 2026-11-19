@@ -2,8 +2,10 @@
 package com.lockwave.player
 
 import android.content.ComponentName
+import android.media.MediaMetadata
 import android.media.session.MediaController
 import android.media.session.PlaybackState
+import android.os.SystemClock
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
@@ -23,6 +25,22 @@ class MusicListenerService : NotificationListenerService() {
             private set
 
         var isPlaying = false
+            private set
+
+        // Track duration in milliseconds
+        var currentDuration = 0L
+            private set
+
+        // Last reported playback position in milliseconds
+        var currentPosition = 0L
+            private set
+
+        // Playback speed reported by the source player
+        var playbackSpeed = 1f
+            private set
+
+        // Monotonic timestamp of the last position update
+        var lastPositionUpdateTime = 0L
             private set
     }
 
@@ -91,7 +109,7 @@ class MusicListenerService : NotificationListenerService() {
                     object : MediaController.Callback() {
 
                         override fun onMetadataChanged(
-                            metadata: android.media.MediaMetadata?
+                            metadata: MediaMetadata?
                         ) {
                             updateTrack(selected)
                         }
@@ -127,25 +145,45 @@ class MusicListenerService : NotificationListenerService() {
         val playback = controller.playbackState
 
         currentTitle = metadata?.getString(
-            android.media.MediaMetadata.METADATA_KEY_TITLE
+            MediaMetadata.METADATA_KEY_TITLE
         ) ?: "Unknown track"
 
         currentArtist = metadata?.getString(
-            android.media.MediaMetadata.METADATA_KEY_ARTIST
+            MediaMetadata.METADATA_KEY_ARTIST
         ) ?: "Unknown artist"
 
         currentAlbum = metadata?.getString(
-            android.media.MediaMetadata.METADATA_KEY_ALBUM
+            MediaMetadata.METADATA_KEY_ALBUM
         ) ?: ""
+
+        currentDuration = (
+            metadata?.getLong(
+                MediaMetadata.METADATA_KEY_DURATION
+            ) ?: 0L
+        ).coerceAtLeast(0L)
+
+        currentPosition = (
+            playback?.position ?: 0L
+        ).coerceAtLeast(0L)
+
+        playbackSpeed = playback?.playbackSpeed ?: 0f
 
         isPlaying = playback?.state ==
             PlaybackState.STATE_PLAYING
 
+        // Record when this position was reported.
+        // The UI can estimate progress between updates.
+        lastPositionUpdateTime =
+            SystemClock.elapsedRealtime()
+
+        // Keep LOCKWAVE's media session synchronized.
         sessionManager?.update(controller)
 
         Log.d(
             TAG,
-            "Now playing: $currentTitle - $currentArtist"
+            "Track: $currentTitle | " +
+                "Position: $currentPosition | " +
+                "Duration: $currentDuration"
         )
     }
 
@@ -156,7 +194,13 @@ class MusicListenerService : NotificationListenerService() {
         currentTitle = "Nothing playing"
         currentArtist = ""
         currentAlbum = ""
+
         isPlaying = false
+
+        currentDuration = 0L
+        currentPosition = 0L
+        playbackSpeed = 0f
+        lastPositionUpdateTime = 0L
 
         sessionManager?.update(null)
     }
@@ -175,6 +219,7 @@ class MusicListenerService : NotificationListenerService() {
 
     override fun onListenerDisconnected() {
         unregisterController()
+
         sessionManager?.release()
         sessionManager = null
 
@@ -183,6 +228,7 @@ class MusicListenerService : NotificationListenerService() {
 
     override fun onDestroy() {
         unregisterController()
+
         sessionManager?.release()
         sessionManager = null
 
