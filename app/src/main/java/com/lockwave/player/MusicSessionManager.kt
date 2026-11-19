@@ -7,6 +7,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
 import android.media.MediaMetadata
 import android.media.session.MediaController
 import android.media.session.MediaSession
@@ -73,7 +74,9 @@ class MusicSessionManager(private val context: Context) {
 
             override fun onSeekTo(position: Long) {
                 if (position >= 0L) {
-                    forward { it.transportControls.seekTo(position) }
+                    forward {
+                        it.transportControls.seekTo(position)
+                    }
                 }
             }
 
@@ -124,17 +127,20 @@ class MusicSessionManager(private val context: Context) {
         val metadata = controller.metadata
         val playback = controller.playbackState
 
-        val title = metadata?.getString(
-            MediaMetadata.METADATA_KEY_TITLE
-        )?.takeIf { it.isNotBlank() } ?: "Unknown track"
+        val title = metadata
+            ?.getString(MediaMetadata.METADATA_KEY_TITLE)
+            ?.takeIf { it.isNotBlank() }
+            ?: "Unknown track"
 
-        val artist = metadata?.getString(
-            MediaMetadata.METADATA_KEY_ARTIST
-        )?.takeIf { it.isNotBlank() } ?: "Unknown artist"
+        val artist = metadata
+            ?.getString(MediaMetadata.METADATA_KEY_ARTIST)
+            ?.takeIf { it.isNotBlank() }
+            ?: "Unknown artist"
 
-        val album = metadata?.getString(
-            MediaMetadata.METADATA_KEY_ALBUM
-        ) ?: ""
+        val album = metadata
+            ?.getString(MediaMetadata.METADATA_KEY_ALBUM)
+            ?.takeIf { it.isNotBlank() }
+            ?: ""
 
         val duration = (
             metadata?.getLong(
@@ -142,22 +148,79 @@ class MusicSessionManager(private val context: Context) {
             ) ?: 0L
         ).coerceAtLeast(0L)
 
-        val metadataKey = "$title|$artist|$album|$duration"
+        // Forward the actual artwork supplied by the music app.
+        val artwork: Bitmap? =
+            metadata?.getBitmap(MediaMetadata.METADATA_KEY_ART)
+                ?: metadata?.getBitmap(
+                    MediaMetadata.METADATA_KEY_ALBUM_ART
+                )
+                ?: metadata?.getBitmap(
+                    MediaMetadata.METADATA_KEY_DISPLAY_ICON
+                )
+
+        val artworkKey = artwork?.generationId ?: 0
+
+        val metadataKey =
+            "$title|$artist|$album|$duration|$artworkKey"
 
         if (metadataKey != lastMetadataKey) {
-            val newMetadata = MediaMetadata.Builder()
-                .putString(MediaMetadata.METADATA_KEY_TITLE, title)
-                .putString(MediaMetadata.METADATA_KEY_ARTIST, artist)
-                .putString(MediaMetadata.METADATA_KEY_ALBUM, album)
-                .putLong(MediaMetadata.METADATA_KEY_DURATION, duration)
-                .build()
 
-            session.setMetadata(newMetadata)
+            val builder = MediaMetadata.Builder()
+                .putString(
+                    MediaMetadata.METADATA_KEY_TITLE,
+                    title
+                )
+                .putString(
+                    MediaMetadata.METADATA_KEY_ARTIST,
+                    artist
+                )
+                .putString(
+                    MediaMetadata.METADATA_KEY_ALBUM,
+                    album
+                )
+                .putString(
+                    MediaMetadata.METADATA_KEY_DISPLAY_TITLE,
+                    title
+                )
+                .putString(
+                    MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE,
+                    artist
+                )
+                .putString(
+                    MediaMetadata.METADATA_KEY_DISPLAY_DESCRIPTION,
+                    album
+                )
+                .putLong(
+                    MediaMetadata.METADATA_KEY_DURATION,
+                    duration
+                )
+
+            if (artwork != null) {
+                builder.putBitmap(
+                    MediaMetadata.METADATA_KEY_ART,
+                    artwork
+                )
+
+                builder.putBitmap(
+                    MediaMetadata.METADATA_KEY_ALBUM_ART,
+                    artwork
+                )
+
+                builder.putBitmap(
+                    MediaMetadata.METADATA_KEY_DISPLAY_ICON,
+                    artwork
+                )
+            }
+
+            session.setMetadata(builder.build())
             lastMetadataKey = metadataKey
         }
 
         val state = playback?.state ?: PlaybackState.STATE_NONE
-        val position = (playback?.position ?: 0L).coerceAtLeast(0L)
+        val position = (
+            playback?.position ?: 0L
+        ).coerceAtLeast(0L)
+
         val speed = playback?.playbackSpeed ?: 0f
         val sourceActions = playback?.actions ?: 0L
 
@@ -167,25 +230,30 @@ class MusicSessionManager(private val context: Context) {
                 PlaybackState.ACTION_PLAY_PAUSE
 
         if (
-            sourceActions and PlaybackState.ACTION_SKIP_TO_NEXT != 0L
+            sourceActions and
+                PlaybackState.ACTION_SKIP_TO_NEXT != 0L
         ) {
-            actions = actions or PlaybackState.ACTION_SKIP_TO_NEXT
+            actions = actions or
+                PlaybackState.ACTION_SKIP_TO_NEXT
         }
 
         if (
-            sourceActions and PlaybackState.ACTION_SKIP_TO_PREVIOUS != 0L
+            sourceActions and
+                PlaybackState.ACTION_SKIP_TO_PREVIOUS != 0L
         ) {
-            actions = actions or PlaybackState.ACTION_SKIP_TO_PREVIOUS
+            actions = actions or
+                PlaybackState.ACTION_SKIP_TO_PREVIOUS
         }
 
         if (
-            sourceActions and PlaybackState.ACTION_SEEK_TO != 0L
+            sourceActions and
+                PlaybackState.ACTION_SEEK_TO != 0L
         ) {
-            actions = actions or PlaybackState.ACTION_SEEK_TO
+            actions = actions or
+                PlaybackState.ACTION_SEEK_TO
         }
 
-        val playbackKey =
-            "$state|$position|$speed|$actions"
+        val playbackKey = "$state|$position|$speed|$actions"
 
         if (playbackKey != lastPlaybackKey) {
             session.setPlaybackState(
@@ -205,24 +273,37 @@ class MusicSessionManager(private val context: Context) {
 
         session.isActive = true
 
-        val notificationKey = "$title|$artist|$state"
+        val notificationKey =
+            "$title|$artist|$album|$state|$artworkKey"
 
         if (notificationKey != lastNotificationKey) {
-            showNotification(title, artist, state)
+            showNotification(
+                title,
+                artist,
+                album,
+                artwork,
+                state
+            )
+
             lastNotificationKey = notificationKey
         }
     }
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+
             val channel = NotificationChannel(
                 CHANNEL_ID,
                 "LOCKWAVE Music",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Compact music playback controls"
+                description =
+                    "Expanded music player and lock-screen controls"
+
                 setShowBadge(false)
-                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+
+                lockscreenVisibility =
+                    Notification.VISIBILITY_PUBLIC
             }
 
             notificationManager.createNotificationChannel(channel)
@@ -265,20 +346,28 @@ class MusicSessionManager(private val context: Context) {
     private fun showNotification(
         title: String,
         artist: String,
+        album: String,
+        artwork: Bitmap?,
         state: Int
     ) {
         val playing = state == PlaybackState.STATE_PLAYING
 
-        val notification = Notification.Builder(context, CHANNEL_ID)
+        val notification = Notification.Builder(
+            context,
+            CHANNEL_ID
+        )
             .setSmallIcon(android.R.drawable.ic_media_play)
             .setContentTitle(title)
             .setContentText(artist)
+            .setSubText(album.takeIf { it.isNotBlank() })
+            .setLargeIcon(artwork)
             .setContentIntent(appIntent())
             .setVisibility(Notification.VISIBILITY_PUBLIC)
             .setCategory(Notification.CATEGORY_TRANSPORT)
             .setOngoing(playing)
             .setShowWhen(false)
             .setOnlyAlertOnce(true)
+            .setLocalOnly(true)
             .setStyle(
                 Notification.MediaStyle()
                     .setMediaSession(session.sessionToken)
@@ -319,7 +408,7 @@ class MusicSessionManager(private val context: Context) {
                 notification
             )
         } catch (_: SecurityException) {
-            // Notification permission may be disabled by the user.
+            // Notification permission may be disabled.
         }
     }
 
