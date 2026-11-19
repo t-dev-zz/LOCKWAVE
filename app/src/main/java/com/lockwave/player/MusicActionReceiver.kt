@@ -13,28 +13,36 @@ class MusicActionReceiver : BroadcastReceiver() {
     }
 
     override fun onReceive(context: Context, intent: Intent) {
+        val action = intent.action ?: return
 
         val position = if (
-            intent.action == MusicSessionManager.ACTION_SEEK
+            action == MusicSessionManager.ACTION_SEEK
         ) {
             intent.getLongExtra(
                 MusicSessionManager.EXTRA_POSITION,
                 -1L
-            )
+            ).takeIf { it >= 0L }
         } else {
             null
         }
 
+        val validAction = action in setOf(
+            MusicSessionManager.ACTION_PLAY,
+            MusicSessionManager.ACTION_PAUSE,
+            MusicSessionManager.ACTION_NEXT,
+            MusicSessionManager.ACTION_PREVIOUS,
+            MusicSessionManager.ACTION_SEEK
+        )
+
+        if (!validAction) return
+
         val success = MusicListenerService.dispatchAction(
-            intent.action,
+            action,
             position
         )
 
         if (!success) {
-            Log.w(
-                TAG,
-                "Could not dispatch playback action: ${intent.action}"
-            )
+            Log.w(TAG, "Playback action unavailable: $action")
         }
     }
 }
