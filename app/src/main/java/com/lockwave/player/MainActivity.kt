@@ -48,6 +48,7 @@ class MainActivity : AppCompatActivity() {
     private var lastPlaying: Boolean? = null
     private var lastDuration = -1L
     private var lastProgress = -1
+    private var lastStatus = ""
 
     private fun dp(value: Int): Int =
         (value * resources.displayMetrics.density).toInt()
@@ -60,6 +61,7 @@ class MainActivity : AppCompatActivity() {
         return GradientDrawable().apply {
             setColor(color)
             cornerRadius = dp(radius).toFloat()
+
             if (stroke != Color.TRANSPARENT) {
                 setStroke(dp(1), stroke)
             }
@@ -76,6 +78,7 @@ class MainActivity : AppCompatActivity() {
             text = value
             textSize = size
             setTextColor(color)
+
             typeface = if (bold) {
                 Typeface.DEFAULT_BOLD
             } else {
@@ -134,6 +137,7 @@ class MainActivity : AppCompatActivity() {
     ): TextView {
         return makeText(symbol, 23f, white, true).apply {
             gravity = Gravity.CENTER
+
             background = rounded(
                 if (primary) {
                     Color.rgb(40, 111, 224)
@@ -196,6 +200,7 @@ class MainActivity : AppCompatActivity() {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
             setPadding(dp(22), dp(35), dp(22), dp(25))
+
             background = GradientDrawable(
                 GradientDrawable.Orientation.TL_BR,
                 intArrayOf(
@@ -211,7 +216,12 @@ class MainActivity : AppCompatActivity() {
             gravity = Gravity.CENTER_VERTICAL
         }
 
-        val brand = makeText("LOCKWAVE", 25f, white, true).apply {
+        val brand = makeText(
+            "LOCKWAVE",
+            25f,
+            white,
+            true
+        ).apply {
             letterSpacing = 0.12f
         }
 
@@ -224,8 +234,14 @@ class MainActivity : AppCompatActivity() {
             )
         )
 
-        val version = makeText("5.0", 11f, cyan, true).apply {
+        val version = makeText(
+            "5.0",
+            11f,
+            cyan,
+            true
+        ).apply {
             setPadding(dp(14), dp(8), dp(14), dp(8))
+
             background = rounded(
                 Color.argb(55, 70, 145, 255),
                 Color.argb(130, 105, 175, 255),
@@ -251,7 +267,14 @@ class MainActivity : AppCompatActivity() {
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
-            setPadding(dp(21), dp(27), dp(21), dp(25))
+
+            setPadding(
+                dp(21),
+                dp(27),
+                dp(21),
+                dp(25)
+            )
+
             background = GradientDrawable(
                 GradientDrawable.Orientation.TL_BR,
                 intArrayOf(
@@ -261,11 +284,13 @@ class MainActivity : AppCompatActivity() {
                 )
             ).apply {
                 cornerRadius = dp(30).toFloat()
+
                 setStroke(
                     dp(1),
                     Color.argb(100, 145, 190, 255)
                 )
             }
+
             elevation = dp(12).toFloat()
         }
 
@@ -276,7 +301,14 @@ class MainActivity : AppCompatActivity() {
             true
         ).apply {
             letterSpacing = 0.15f
-            setPadding(dp(13), dp(8), dp(13), dp(8))
+
+            setPadding(
+                dp(13),
+                dp(8),
+                dp(13),
+                dp(8)
+            )
+
             background = rounded(
                 Color.argb(35, 90, 160, 255),
                 Color.argb(75, 125, 185, 255),
@@ -287,7 +319,12 @@ class MainActivity : AppCompatActivity() {
         card.addView(live)
         gap(card, 28)
 
-        val musicSymbol = makeText("♫", 76f, blue, true).apply {
+        val musicSymbol = makeText(
+            "♫",
+            76f,
+            blue,
+            true
+        ).apply {
             gravity = Gravity.CENTER
         }
 
@@ -428,8 +465,19 @@ class MainActivity : AppCompatActivity() {
             gravity = Gravity.CENTER_VERTICAL
         }
 
-        elapsedView = makeText("0:00", 11f, muted, true)
-        durationView = makeText("0:00", 11f, muted, true)
+        elapsedView = makeText(
+            "0:00",
+            11f,
+            muted,
+            true
+        )
+
+        durationView = makeText(
+            "0:00",
+            11f,
+            muted,
+            true
+        )
 
         timeRow.addView(
             elapsedView,
@@ -446,7 +494,9 @@ class MainActivity : AppCompatActivity() {
         gap(card, 25)
 
         val divider = View(this).apply {
-            setBackgroundColor(Color.argb(65, 165, 195, 240))
+            setBackgroundColor(
+                Color.argb(65, 165, 195, 240)
+            )
         }
 
         card.addView(
@@ -531,12 +581,20 @@ class MainActivity : AppCompatActivity() {
             true
         ).apply {
             gravity = Gravity.CENTER
-            setPadding(dp(16), dp(15), dp(16), dp(15))
+
+            setPadding(
+                dp(16),
+                dp(15),
+                dp(16),
+                dp(15)
+            )
+
             background = rounded(
                 Color.argb(35, 90, 160, 255),
                 Color.argb(100, 105, 175, 255),
                 18
             )
+
             isClickable = true
             isFocusable = true
 
@@ -577,6 +635,8 @@ class MainActivity : AppCompatActivity() {
 
         scroll.addView(root)
         setContentView(scroll)
+
+        updatePlayerUi()
     }
 
     private val refreshPlayer = object : Runnable {
@@ -612,21 +672,29 @@ class MainActivity : AppCompatActivity() {
             artistView.text = displayArtist
         }
 
+        // Update playback button only when playback changes.
         if (playing != lastPlaying) {
             lastPlaying = playing
 
             playButton.text = if (playing) "Ⅱ" else "▶"
-
-            statusView.text = when {
-                title == "Nothing playing" -> "WAITING FOR MUSIC"
-                playing -> "NOW PLAYING"
-                else -> "PAUSED"
-            }
-
-            statusView.setTextColor(
-                if (playing) cyan else muted
-            )
         }
+
+        // Update status independently of playback state.
+        // This fixes the new-track / unchanged-playing-state bug.
+        val newStatus = when {
+            title == "Nothing playing" -> "WAITING FOR MUSIC"
+            playing -> "NOW PLAYING"
+            else -> "PAUSED"
+        }
+
+        if (newStatus != lastStatus) {
+            lastStatus = newStatus
+            statusView.text = newStatus
+        }
+
+        statusView.setTextColor(
+            if (playing && title != "Nothing playing") cyan else muted
+        )
 
         if (duration != lastDuration) {
             lastDuration = duration
@@ -637,6 +705,7 @@ class MainActivity : AppCompatActivity() {
         if (title == "Nothing playing") {
             if (!isDragging && seekBar.progress != 0) {
                 seekBar.progress = 0
+                lastProgress = 0
             }
 
             elapsedView.text = "0:00"
