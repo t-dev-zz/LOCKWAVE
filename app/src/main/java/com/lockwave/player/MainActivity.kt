@@ -118,7 +118,7 @@ class MainActivity : AppCompatActivity() {
         val playerCard = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
-            setPadding(dp(22), dp(30), dp(22), dp(30))
+            setPadding(dp(22), dp(22), dp(22), dp(22))
             background = rounded(cardColor, 28)
         }
 
@@ -135,7 +135,7 @@ class MainActivity : AppCompatActivity() {
             musicIcon,
             LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
-                dp(125)
+                dp(105)
             )
         )
 
@@ -190,7 +190,7 @@ class MainActivity : AppCompatActivity() {
             ViewGroup.LayoutParams.MATCH_PARENT,
             ViewGroup.LayoutParams.WRAP_CONTENT
         ).apply {
-            topMargin = dp(25)
+            topMargin = dp(16)
         }
 
         playerCard.addView(playbackStatus, statusParams)
