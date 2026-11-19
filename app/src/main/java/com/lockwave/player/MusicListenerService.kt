@@ -3,6 +3,7 @@ package com.lockwave.player
 
 import android.content.ComponentName
 import android.content.Context
+import android.media.MediaMetadata
 import android.media.session.MediaController
 import android.media.session.MediaSessionManager
 import android.media.session.PlaybackState
@@ -115,22 +116,27 @@ class MusicListenerService : NotificationListenerService() {
         sessionManager = MusicSessionManager(this)
 
         try {
-            platformSessionManager = getSystemService(
+            val manager = getSystemService(
                 Context.MEDIA_SESSION_SERVICE
             ) as MediaSessionManager
+
+            platformSessionManager = manager
 
             val component = ComponentName(
                 this,
                 MusicListenerService::class.java
             )
 
-            sessionsListener =
+            // Keep a non-null local reference for Android's API.
+            val listener =
                 MediaSessionManager.OnActiveSessionsChangedListener {
                     scheduleRefresh()
                 }
 
-            platformSessionManager?.addOnActiveSessionsChangedListener(
-                sessionsListener,
+            sessionsListener = listener
+
+            manager.addOnActiveSessionsChangedListener(
+                listener,
                 component,
                 handler
             )
@@ -203,9 +209,10 @@ class MusicListenerService : NotificationListenerService() {
                 val callback = object : MediaController.Callback() {
 
                     override fun onMetadataChanged(
-                        metadata: android.media.MediaMetadata?
+                        metadata: MediaMetadata?
                     ) {
-                        if (activeController?.sessionToken ==
+                        if (
+                            activeController?.sessionToken ==
                             selected.sessionToken
                         ) {
                             updateTrack(selected)
@@ -215,7 +222,8 @@ class MusicListenerService : NotificationListenerService() {
                     override fun onPlaybackStateChanged(
                         state: PlaybackState?
                     ) {
-                        if (activeController?.sessionToken ==
+                        if (
+                            activeController?.sessionToken ==
                             selected.sessionToken
                         ) {
                             updateTrack(selected)
@@ -246,22 +254,22 @@ class MusicListenerService : NotificationListenerService() {
         val playback = controller.playbackState
 
         val title = metadata
-            ?.getString(android.media.MediaMetadata.METADATA_KEY_TITLE)
+            ?.getString(MediaMetadata.METADATA_KEY_TITLE)
             ?.takeIf { it.isNotBlank() }
             ?: "Unknown track"
 
         val artist = metadata
-            ?.getString(android.media.MediaMetadata.METADATA_KEY_ARTIST)
+            ?.getString(MediaMetadata.METADATA_KEY_ARTIST)
             ?.takeIf { it.isNotBlank() }
             ?: "Unknown artist"
 
         val album = metadata
-            ?.getString(android.media.MediaMetadata.METADATA_KEY_ALBUM)
+            ?.getString(MediaMetadata.METADATA_KEY_ALBUM)
             ?: ""
 
         val duration = (
             metadata?.getLong(
-                android.media.MediaMetadata.METADATA_KEY_DURATION
+                MediaMetadata.METADATA_KEY_DURATION
             ) ?: 0L
         ).coerceAtLeast(0L)
 
@@ -331,11 +339,14 @@ class MusicListenerService : NotificationListenerService() {
         if (!listenerRegistered) return
 
         try {
-            sessionsListener?.let {
+            val listener = sessionsListener
+
+            if (listener != null) {
                 platformSessionManager
-                    ?.removeOnActiveSessionsChangedListener(it)
+                    ?.removeOnActiveSessionsChangedListener(listener)
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            Log.w(TAG, "Session listener cleanup failed", e)
         }
 
         sessionsListener = null
@@ -364,6 +375,8 @@ class MusicListenerService : NotificationListenerService() {
 
         sessionManager?.release()
         sessionManager = null
+
+        platformSessionManager = null
 
         super.onDestroy()
     }
