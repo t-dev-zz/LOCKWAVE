@@ -2,7 +2,6 @@
 package com.lockwave.player
 
 import android.content.ComponentName
-import android.media.MediaMetadata
 import android.media.session.MediaController
 import android.media.session.PlaybackState
 import android.service.notification.NotificationListenerService
@@ -14,25 +13,30 @@ class MusicListenerService : NotificationListenerService() {
     companion object {
         private const val TAG = "LOCKWAVE"
 
-        var currentTitle: String = "Nothing playing"
+        var currentTitle = "Nothing playing"
             private set
 
-        var currentArtist: String = ""
+        var currentArtist = ""
             private set
 
-        var currentAlbum: String = ""
+        var currentAlbum = ""
             private set
 
-        var isPlaying: Boolean = false
+        var isPlaying = false
             private set
     }
 
     private var activeController: MediaController? = null
     private var controllerCallback: MediaController.Callback? = null
+    private var sessionManager: MusicSessionManager? = null
 
     override fun onListenerConnected() {
         super.onListenerConnected()
-        Log.d(TAG, "Music listener connected")
+
+        Log.d(TAG, "LOCKWAVE music engine connected")
+
+        sessionManager = MusicSessionManager(this)
+
         refreshSessions()
     }
 
@@ -75,13 +79,14 @@ class MusicListenerService : NotificationListenerService() {
                 selected.sessionToken
             ) {
                 unregisterController()
+
                 activeController = selected
 
                 controllerCallback =
                     object : MediaController.Callback() {
 
                         override fun onMetadataChanged(
-                            metadata: MediaMetadata?
+                            metadata: android.media.MediaMetadata?
                         ) {
                             updateTrack(selected)
                         }
@@ -105,44 +110,50 @@ class MusicListenerService : NotificationListenerService() {
             updateTrack(selected)
 
         } catch (e: SecurityException) {
-            Log.e(TAG, "Notification access is not enabled", e)
+            Log.e(TAG, "Notification access required", e)
         } catch (e: Exception) {
-            Log.e(TAG, "Unable to read music session", e)
+            Log.e(TAG, "Session detection failed", e)
         }
     }
 
     private fun updateTrack(controller: MediaController) {
+
         val metadata = controller.metadata
-        val state = controller.playbackState
+        val playback = controller.playbackState
 
         currentTitle = metadata?.getString(
-            MediaMetadata.METADATA_KEY_TITLE
+            android.media.MediaMetadata.METADATA_KEY_TITLE
         ) ?: "Unknown track"
 
         currentArtist = metadata?.getString(
-            MediaMetadata.METADATA_KEY_ARTIST
+            android.media.MediaMetadata.METADATA_KEY_ARTIST
         ) ?: "Unknown artist"
 
         currentAlbum = metadata?.getString(
-            MediaMetadata.METADATA_KEY_ALBUM
+            android.media.MediaMetadata.METADATA_KEY_ALBUM
         ) ?: ""
 
-        isPlaying = state?.state ==
+        isPlaying = playback?.state ==
             PlaybackState.STATE_PLAYING
+
+        sessionManager?.update(controller)
 
         Log.d(
             TAG,
-            "Track: $currentTitle - $currentArtist | Playing: $isPlaying"
+            "Now playing: $currentTitle - $currentArtist"
         )
     }
 
     private fun clearCurrentTrack() {
+
         unregisterController()
 
         currentTitle = "Nothing playing"
         currentArtist = ""
         currentAlbum = ""
         isPlaying = false
+
+        sessionManager?.update(null)
     }
 
     private fun unregisterController() {
@@ -159,11 +170,17 @@ class MusicListenerService : NotificationListenerService() {
 
     override fun onListenerDisconnected() {
         unregisterController()
+        sessionManager?.release()
+        sessionManager = null
+
         super.onListenerDisconnected()
     }
 
     override fun onDestroy() {
         unregisterController()
+        sessionManager?.release()
+        sessionManager = null
+
         super.onDestroy()
     }
 }
