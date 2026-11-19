@@ -1,319 +1,697 @@
 
 package com.lockwave.player
 
-import android.app.Notification
-import android.app.NotificationChannel
-import android.app.NotificationManager
-import android.app.PendingIntent
-import android.content.Context
 import android.content.Intent
-import android.graphics.Bitmap
-import android.media.MediaMetadata
-import android.media.session.MediaController
-import android.media.session.MediaSession
-import android.media.session.PlaybackState
-import android.os.Build
+import android.content.res.ColorStateList
+import android.graphics.Color
+import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
+import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
+import android.view.Gravity
+import android.view.HapticFeedbackConstants
+import android.view.View
+import android.view.ViewGroup
+import android.widget.LinearLayout
+import android.widget.ScrollView
+import android.widget.SeekBar
+import android.widget.TextView
+import androidx.appcompat.app.AppCompatActivity
 
-class MusicSessionManager(
-    private val context: Context
-) {
+class MainActivity : AppCompatActivity() {
 
-    companion object {
-        private const val CHANNEL_ID = "lockwave_music"
-        private const val NOTIFICATION_ID = 1001
+    private val bg = Color.rgb(6, 11, 23)
+    private val blue = Color.rgb(72, 145, 255)
+    private val cyan = Color.rgb(120, 211, 255)
+    private val white = Color.WHITE
+    private val muted = Color.rgb(143, 159, 185)
 
-        const val ACTION_PLAY = "com.lockwave.player.PLAY"
-        const val ACTION_PAUSE = "com.lockwave.player.PAUSE"
-        const val ACTION_NEXT = "com.lockwave.player.NEXT"
-        const val ACTION_PREVIOUS = "com.lockwave.player.PREVIOUS"
-    }
+    private val handler = Handler(Looper.getMainLooper())
 
-    private val notificationManager =
-        context.getSystemService(
-            Context.NOTIFICATION_SERVICE
-        ) as NotificationManager
+    private lateinit var titleView: TextView
+    private lateinit var artistView: TextView
+    private lateinit var statusView: TextView
+    private lateinit var heroIcon: TextView
+    private lateinit var playButton: TextView
+    private lateinit var seekBar: SeekBar
+    private lateinit var elapsedView: TextView
+    private lateinit var durationView: TextView
 
-    private val session = MediaSession(context, "LOCKWAVE")
+    private var isDragging = false
 
-    private var sourceController: MediaController? = null
+    private fun dp(value: Int): Int =
+        (value * resources.displayMetrics.density).toInt()
 
-    init {
-        createNotificationChannel()
-
-        session.setFlags(
-            MediaSession.FLAG_HANDLES_MEDIA_BUTTONS or
-                MediaSession.FLAG_HANDLES_TRANSPORT_CONTROLS
-        )
-
-        session.setCallback(
-            object : MediaSession.Callback() {
-
-                override fun onPlay() {
-                    sourceController?.transportControls?.play()
-                }
-
-                override fun onPause() {
-                    sourceController?.transportControls?.pause()
-                }
-
-                override fun onPlayFromMediaId(
-                    mediaId: String?,
-                    extras: android.os.Bundle?
-                ) {
-                    sourceController?.transportControls?.play()
-                }
-
-                override fun onSkipToNext() {
-                    sourceController?.transportControls?.skipToNext()
-                }
-
-                override fun onSkipToPrevious() {
-                    sourceController?.transportControls?.skipToPrevious()
-                }
-
-                override fun onSeekTo(pos: Long) {
-                    sourceController?.transportControls?.seekTo(pos)
-                }
-
-                override fun onStop() {
-                    sourceController?.transportControls?.pause()
-                }
-            }
-        )
-    }
-
-    fun update(controller: MediaController?) {
-
-        sourceController = controller
-
-        if (controller == null) {
-            session.isActive = false
-            session.setPlaybackState(
-                PlaybackState.Builder()
-                    .setState(
-                        PlaybackState.STATE_NONE,
-                        0L,
-                        0f
-                    )
-                    .build()
-            )
-            notificationManager.cancel(NOTIFICATION_ID)
-            return
-        }
-
-        val metadata = controller.metadata
-        val playback = controller.playbackState
-
-        val title = metadata?.getString(
-            MediaMetadata.METADATA_KEY_TITLE
-        ) ?: "Unknown track"
-
-        val artist = metadata?.getString(
-            MediaMetadata.METADATA_KEY_ARTIST
-        ) ?: "Unknown artist"
-
-        val artwork: Bitmap? =
-            metadata?.getBitmap(
-                MediaMetadata.METADATA_KEY_ART
-            ) ?: metadata?.getBitmap(
-                MediaMetadata.METADATA_KEY_ALBUM_ART
-            )
-
-        val duration = metadata?.getLong(
-            MediaMetadata.METADATA_KEY_DURATION
-        ) ?: 0L
-
-        session.setMetadata(
-            android.media.MediaMetadata.Builder()
-                .putString(
-                    MediaMetadata.METADATA_KEY_TITLE,
-                    title
-                )
-                .putString(
-                    MediaMetadata.METADATA_KEY_ARTIST,
-                    artist
-                )
-                .putLong(
-                    MediaMetadata.METADATA_KEY_DURATION,
-                    duration
-                )
-                .apply {
-                    if (artwork != null) {
-                        putBitmap(
-                            MediaMetadata.METADATA_KEY_ART,
-                            artwork
-                        )
-                        putBitmap(
-                            MediaMetadata.METADATA_KEY_ALBUM_ART,
-                            artwork
-                        )
-                    }
-                }
-                .build()
-        )
-
-        val state = playback?.state
-            ?: PlaybackState.STATE_NONE
-
-        val position = playback?.position ?: 0L
-        val speed = playback?.playbackSpeed ?: 1f
-
-        val sourceActions = playback?.actions ?: 0L
-
-        val actions =
-            PlaybackState.ACTION_PLAY or
-            PlaybackState.ACTION_PAUSE or
-            PlaybackState.ACTION_PLAY_PAUSE or
-            PlaybackState.ACTION_SKIP_TO_NEXT or
-            PlaybackState.ACTION_SKIP_TO_PREVIOUS or
-            (sourceActions and PlaybackState.ACTION_SEEK_TO)
-
-        session.setPlaybackState(
-            PlaybackState.Builder()
-                .setActions(actions)
-                .setState(
-                    state,
-                    position,
-                    speed,
-                    SystemClock.elapsedRealtime()
-                )
-                .build()
-        )
-
-        session.isActive = true
-
-        showNotification(
-            title,
-            artist,
-            artwork,
-            state
-        )
-    }
-
-    private fun createNotificationChannel() {
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                "LOCKWAVE Music",
-                NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                description = "Current music playback"
-                setShowBadge(false)
-                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
-            }
-
-            notificationManager.createNotificationChannel(channel)
+    private fun glass(
+        color: Int,
+        stroke: Int,
+        radius: Int
+    ): GradientDrawable {
+        return GradientDrawable().apply {
+            setColor(color)
+            cornerRadius = dp(radius).toFloat()
+            setStroke(dp(1), stroke)
         }
     }
 
-    private fun actionIntent(action: String): PendingIntent {
+    private fun makeText(
+        value: String,
+        size: Float,
+        color: Int,
+        bold: Boolean = false
+    ): TextView {
+        return TextView(this).apply {
+            text = value
+            textSize = size
+            setTextColor(color)
+            typeface = if (bold) {
+                Typeface.DEFAULT_BOLD
+            } else {
+                Typeface.create("sans-serif", Typeface.NORMAL)
+            }
+        }
+    }
+
+    private fun gap(
+        parent: LinearLayout,
+        height: Int
+    ) {
+        parent.addView(
+            View(this),
+            LinearLayout.LayoutParams(1, dp(height))
+        )
+    }
+
+    private fun sendMusicAction(
+        action: String,
+        position: Long? = null,
+        source: View? = null
+    ) {
+        source?.performHapticFeedback(
+            HapticFeedbackConstants.VIRTUAL_KEY
+        )
 
         val intent = Intent(
-            context,
+            this,
             MusicActionReceiver::class.java
         ).setAction(action)
 
-        return PendingIntent.getBroadcast(
-            context,
-            action.hashCode(),
-            intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or
-                PendingIntent.FLAG_IMMUTABLE
-        )
-    }
-
-    private fun appIntent(): PendingIntent {
-
-        val intent = Intent(
-            context,
-            MainActivity::class.java
-        ).apply {
-            flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or
-                Intent.FLAG_ACTIVITY_SINGLE_TOP
+        if (position != null) {
+            intent.putExtra(
+                MusicSessionManager.EXTRA_POSITION,
+                position
+            )
         }
 
-        return PendingIntent.getActivity(
-            context,
-            2001,
-            intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or
-                PendingIntent.FLAG_IMMUTABLE
+        sendBroadcast(intent)
+    }
+
+    private fun controlButton(
+        symbol: String,
+        size: Float,
+        width: Int,
+        height: Int,
+        primary: Boolean,
+        action: String
+    ): TextView {
+
+        val button = makeText(
+            symbol,
+            size,
+            white,
+            true
+        ).apply {
+            gravity = Gravity.CENTER
+            background = if (primary) {
+                glass(
+                    Color.rgb(43, 111, 220),
+                    Color.rgb(125, 190, 255),
+                    50
+                )
+            } else {
+                glass(
+                    Color.argb(50, 100, 135, 185),
+                    Color.argb(80, 170, 200, 255),
+                    50
+                )
+            }
+
+            isClickable = true
+            isFocusable = true
+
+            setOnClickListener {
+                sendMusicAction(action, source = this)
+            }
+        }
+
+        button.layoutParams = LinearLayout.LayoutParams(
+            dp(width),
+            dp(height)
+        )
+
+        return button
+    }
+
+    private fun formatTime(milliseconds: Long): String {
+        val totalSeconds = (milliseconds / 1000L).coerceAtLeast(0L)
+        val minutes = totalSeconds / 60L
+        val seconds = totalSeconds % 60L
+
+        return String.format(
+            java.util.Locale.US,
+            "%d:%02d",
+            minutes,
+            seconds
         )
     }
 
-    private fun showNotification(
-        title: String,
-        artist: String,
-        artwork: Bitmap?,
-        state: Int
-    ) {
-
-        val playing = state == PlaybackState.STATE_PLAYING
-
-        val notification = Notification.Builder(
-            context,
-            CHANNEL_ID
-        )
-            .setSmallIcon(android.R.drawable.ic_media_play)
-            .setContentTitle(title)
-            .setContentText(artist)
-            .setLargeIcon(artwork)
-            .setContentIntent(appIntent())
-            .setVisibility(Notification.VISIBILITY_PUBLIC)
-            .setCategory(Notification.CATEGORY_TRANSPORT)
-            .setOngoing(playing)
-            .setShowWhen(false)
-            .setOnlyAlertOnce(true)
-            .setStyle(
-                Notification.MediaStyle()
-                    .setMediaSession(session.sessionToken)
-                    .setShowActionsInCompactView(0, 1, 2)
-            )
-            .addAction(
-                Notification.Action.Builder(
-                    android.R.drawable.ic_media_previous,
-                    "Previous",
-                    actionIntent(ACTION_PREVIOUS)
-                ).build()
-            )
-            .addAction(
-                Notification.Action.Builder(
-                    if (playing) {
-                        android.R.drawable.ic_media_pause
-                    } else {
-                        android.R.drawable.ic_media_play
-                    },
-                    if (playing) "Pause" else "Play",
-                    actionIntent(
-                        if (playing) ACTION_PAUSE else ACTION_PLAY
-                    )
-                ).build()
-            )
-            .addAction(
-                Notification.Action.Builder(
-                    android.R.drawable.ic_media_next,
-                    "Next",
-                    actionIntent(ACTION_NEXT)
-                ).build()
-            )
-            .build()
-
-        notificationManager.notify(
-            NOTIFICATION_ID,
-            notification
-        )
+    private val refreshPlayer = object : Runnable {
+        override fun run() {
+            updatePlayerUi()
+            handler.postDelayed(this, 400)
+        }
     }
 
-    fun release() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
 
-        sourceController = null
+        window.statusBarColor = bg
+        window.navigationBarColor = bg
+        window.decorView.systemUiVisibility = 0
 
-        session.isActive = false
-        session.release()
+        val scroll = ScrollView(this).apply {
+            fillViewport = true
+            setBackgroundColor(bg)
+            isVerticalScrollBarEnabled = false
+        }
 
-        notificationManager.cancel(NOTIFICATION_ID)
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            setPadding(dp(23), dp(30), dp(23), dp(22))
+            background = GradientDrawable(
+                GradientDrawable.Orientation.TL_BR,
+                intArrayOf(
+                    Color.rgb(14, 28, 53),
+                    bg,
+                    Color.rgb(8, 16, 32)
+                )
+            )
+        }
+
+        // HEADER
+
+        val header = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+
+        val brand = makeText(
+            "LOCKWAVE",
+            25f,
+            white,
+            true
+        ).apply {
+            letterSpacing = 0.15f
+        }
+
+        header.addView(
+            brand,
+            LinearLayout.LayoutParams(
+                0,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                1f
+            )
+        )
+
+        val version = makeText(
+            "3.0",
+            11f,
+            cyan,
+            true
+        ).apply {
+            gravity = Gravity.CENTER
+            setPadding(dp(13), dp(7), dp(13), dp(7))
+            background = glass(
+                Color.argb(40, 76, 151, 255),
+                Color.argb(100, 76, 151, 255),
+                30
+            )
+        }
+
+        header.addView(version)
+        root.addView(header)
+
+        val subtitle = makeText(
+            "YOUR MUSIC. YOUR LOCK SCREEN.",
+            10f,
+            muted,
+            true
+        ).apply {
+            letterSpacing = 0.17f
+        }
+
+        val subtitleParams = LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT
+        ).apply {
+            topMargin = dp(9)
+        }
+
+        root.addView(subtitle, subtitleParams)
+
+        gap(root, 34)
+
+        // MAIN PLAYER CARD
+
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            setPadding(dp(21), dp(23), dp(21), dp(23))
+            background = glass(
+                Color.argb(165, 24, 40, 68),
+                Color.argb(75, 155, 195, 255),
+                30
+            )
+            elevation = dp(12).toFloat()
+        }
+
+        val liveLabel = makeText(
+            "●  LIVE SESSION",
+            10f,
+            cyan,
+            true
+        ).apply {
+            letterSpacing = 0.17f
+        }
+
+        card.addView(liveLabel)
+
+        gap(card, 22)
+
+        heroIcon = makeText(
+            "♫",
+            82f,
+            blue,
+            true
+        ).apply {
+            gravity = Gravity.CENTER
+            setShadowLayer(
+                dp(22).toFloat(),
+                0f,
+                0f,
+                Color.argb(160, 45, 125, 255)
+            )
+        }
+
+        card.addView(
+            heroIcon,
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(105)
+            )
+        )
+
+        gap(card, 18)
+
+        titleView = makeText(
+            "Nothing playing",
+            23f,
+            white,
+            true
+        ).apply {
+            gravity = Gravity.CENTER
+            maxLines = 2
+        }
+
+        card.addView(
+            titleView,
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            )
+        )
+
+        artistView = makeText(
+            "Your next song will appear here.",
+            13f,
+            muted
+        ).apply {
+            gravity = Gravity.CENTER
+            maxLines = 1
+        }
+
+        val artistParams = LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT
+        ).apply {
+            topMargin = dp(8)
+        }
+
+        card.addView(artistView, artistParams)
+
+        gap(card, 17)
+
+        statusView = makeText(
+            "WAITING FOR MUSIC",
+            10f,
+            muted,
+            true
+        ).apply {
+            letterSpacing = 0.17f
+        }
+
+        card.addView(statusView)
+
+        gap(card, 25)
+
+        // PROGRESS BAR
+
+        seekBar = SeekBar(this).apply {
+            max = 1000
+            progress = 0
+            isEnabled = false
+
+            progressTintList = ColorStateList.valueOf(blue)
+            thumbTintList = ColorStateList.valueOf(cyan)
+            progressBackgroundTintList =
+                ColorStateList.valueOf(
+                    Color.argb(75, 170, 195, 230)
+                )
+
+            setOnSeekBarChangeListener(
+                object : SeekBar.OnSeekBarChangeListener {
+
+                    override fun onProgressChanged(
+                        bar: SeekBar?,
+                        progress: Int,
+                        fromUser: Boolean
+                    ) {
+                        if (fromUser) {
+                            val duration =
+                                MusicListenerService.currentDuration
+
+                            val position =
+                                duration * progress / 1000L
+
+                            elapsedView.text = formatTime(position)
+                        }
+                    }
+
+                    override fun onStartTrackingTouch(
+                        bar: SeekBar?
+                    ) {
+                        isDragging = true
+                    }
+
+                    override fun onStopTrackingTouch(
+                        bar: SeekBar?
+                    ) {
+                        val duration =
+                            MusicListenerService.currentDuration
+
+                        if (duration > 0L) {
+                            val position =
+                                duration * seekBar.progress / 1000L
+
+                            sendMusicAction(
+                                MusicSessionManager.ACTION_SEEK,
+                                position,
+                                seekBar
+                            )
+                        }
+
+                        isDragging = false
+                    }
+                }
+            )
+        }
+
+        card.addView(
+            seekBar,
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(35)
+            )
+        )
+
+        val timeRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+
+        elapsedView = makeText(
+            "0:00",
+            11f,
+            muted,
+            true
+        )
+
+        durationView = makeText(
+            "0:00",
+            11f,
+            muted,
+            true
+        )
+
+        timeRow.addView(
+            elapsedView,
+            LinearLayout.LayoutParams(
+                0,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                1f
+            )
+        )
+
+        timeRow.addView(durationView)
+
+        card.addView(timeRow)
+
+        gap(card, 23)
+
+        val separator = View(this).apply {
+            setBackgroundColor(
+                Color.argb(50, 170, 200, 255)
+            )
+        }
+
+        card.addView(
+            separator,
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(1)
+            )
+        )
+
+        gap(card, 22)
+
+        // PLAYBACK CONTROLS
+
+        val controls = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+        }
+
+        val previous = controlButton(
+            "|◀",
+            22f,
+            55,
+            55,
+            false,
+            MusicSessionManager.ACTION_PREVIOUS
+        )
+
+        controls.addView(previous)
+
+        controls.addView(
+            View(this),
+            LinearLayout.LayoutParams(dp(22), 1)
+        )
+
+        playButton = controlButton(
+            "▶",
+            27f,
+            70,
+            70,
+            true,
+            MusicSessionManager.ACTION_PLAY
+        )
+
+        controls.addView(playButton)
+
+        controls.addView(
+            View(this),
+            LinearLayout.LayoutParams(dp(22), 1)
+        )
+
+        val next = controlButton(
+            "▶|",
+            22f,
+            55,
+            55,
+            false,
+            MusicSessionManager.ACTION_NEXT
+        )
+
+        controls.addView(next)
+
+        card.addView(controls)
+
+        root.addView(
+            card,
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            )
+        )
+
+        gap(root, 28)
+
+        val footer = makeText(
+            "CRAFTED FOR THE SOUND.",
+            10f,
+            muted,
+            true
+        ).apply {
+            letterSpacing = 0.2f
+            gravity = Gravity.CENTER
+        }
+
+        root.addView(
+            footer,
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(35)
+            )
+        )
+
+        scroll.addView(root)
+        setContentView(scroll)
+
+        updatePlayerUi()
+    }
+
+    private fun updatePlayerUi() {
+
+        val title = MusicListenerService.currentTitle
+        val artist = MusicListenerService.currentArtist
+        val playing = MusicListenerService.isPlaying
+
+        val duration =
+            MusicListenerService.currentDuration
+
+        val basePosition =
+            MusicListenerService.currentPosition
+
+        val updateTime =
+            MusicListenerService.lastPositionUpdateTime
+
+        val speed =
+            MusicListenerService.playbackSpeed
+
+        if (title == "Nothing playing") {
+
+            titleView.text = "Nothing playing"
+            artistView.text = "Your next song will appear here."
+
+            heroIcon.text = "♫"
+
+            statusView.text = "WAITING FOR MUSIC"
+            statusView.setTextColor(muted)
+
+            seekBar.isEnabled = false
+            seekBar.progress = 0
+
+            elapsedView.text = "0:00"
+            durationView.text = "0:00"
+
+            playButton.text = "▶"
+
+        } else {
+
+            titleView.text = title
+
+            artistView.text = artist.ifBlank {
+                MusicListenerService.currentAlbum.ifBlank {
+                    "Unknown artist"
+                }
+            }
+
+            heroIcon.text = if (playing) "♫" else "Ⅱ"
+
+            statusView.text = if (playing) {
+                "●  NOW PLAYING"
+            } else {
+                "Ⅱ  PAUSED"
+            }
+
+            statusView.setTextColor(
+                if (playing) cyan else muted
+            )
+
+            playButton.text = if (playing) "Ⅱ" else "▶"
+
+            val estimatedPosition = if (
+                playing && updateTime > 0L
+            ) {
+                basePosition +
+                    (
+                        (SystemClock.elapsedRealtime() - updateTime) *
+                            speed
+                    ).toLong()
+            } else {
+                basePosition
+            }
+
+            val position = estimatedPosition.coerceIn(
+                0L,
+                duration.coerceAtLeast(0L)
+            )
+
+            if (!isDragging) {
+                seekBar.isEnabled = duration > 0L
+
+                seekBar.progress = if (duration > 0L) {
+                    ((position * 1000L) / duration)
+                        .toInt()
+                        .coerceIn(0, 1000)
+                } else {
+                    0
+                }
+
+                elapsedView.text = formatTime(position)
+            }
+
+            durationView.text = formatTime(duration)
+        }
+
+        playButton.setOnClickListener {
+            sendMusicAction(
+                if (MusicListenerService.isPlaying) {
+                    MusicSessionManager.ACTION_PAUSE
+                } else {
+                    MusicSessionManager.ACTION_PLAY
+                },
+                source = playButton
+            )
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        handler.removeCallbacks(refreshPlayer)
+        handler.post(refreshPlayer)
+    }
+
+    override fun onPause() {
+        handler.removeCallbacks(refreshPlayer)
+        super.onPause()
+    }
+
+    override fun onDestroy() {
+        handler.removeCallbacks(refreshPlayer)
+        super.onDestroy()
     }
 }
